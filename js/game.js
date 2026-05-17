@@ -393,7 +393,7 @@ const Game = {
       if (p.active) continue;
       const dx = this.localCar.x - p.x;
       const dz = this.localCar.z - p.z;
-      const r2 = (p.big ? 3.6 * Arena.SCALE : 2.0 * Arena.SCALE);
+      const r2 = (p.big ? Arena.PAD_PICKUP_RADIUS_BIG : Arena.PAD_PICKUP_RADIUS_SMALL);
       if (dx * dx + dz * dz < r2 * r2 + 1 && !p._sfxPlayed) {
         SFX.boostPad(p.big);
         p._sfxPlayed = true;
