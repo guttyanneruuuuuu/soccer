@@ -8,7 +8,7 @@ const Arena = {
   SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
   W: 82 * ARENA_SCALE,            // 短辺(X) ハーフ幅 = 41
   L: 104 * ARENA_SCALE,           // 長辺(Z) ハーフ長 = 52
-  H: 34 * ARENA_SCALE,            // 天井までの高さ(少し低くして展開を速く)
+  H: 24 * ARENA_SCALE,            // 天井をさらに低くして空中戦を詰める
   GOAL_W: 26 * ARENA_SCALE,       // ゴール幅
   GOAL_H: 13 * ARENA_SCALE,       // ゴールの高さ
   GOAL_DEPTH: 8 * ARENA_SCALE,    // ゴール奥行き
@@ -21,6 +21,7 @@ const Arena = {
 
   group: null,
   boostPads: [],    // {x, z, big, active, recoverAt, mesh, ring}
+  superJumpZones: [], // {x, z, radius, jumpMult, mesh, ring}
   cornerWalls: [],  // {p1, p2, normal} — 斜めコーナー壁の衝突ライン (XZ平面)
   EDGE_NORMAL_BLEND_DOT: 0.35, // dotが高い=最近点法線と内向き法線が近い(端点寄り)ため角として処理する
 
@@ -311,6 +312,37 @@ const Arena = {
       });
     }
 
+    // ===== スーパージャンプゾーン =====
+    this.superJumpZones = [];
+    const jumpZones = [
+      { x: 0, z: 0, radius: 4.2 * S, jumpMult: 3.2 },
+      { x: -18 * S, z: 0, radius: 3.6 * S, jumpMult: 2.8 },
+      { x:  18 * S, z: 0, radius: 3.6 * S, jumpMult: 2.8 },
+    ];
+    for (const jz of jumpZones) {
+      const zoneMesh = new THREE.Mesh(
+        new THREE.CircleGeometry(jz.radius, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0x7c4dff, transparent: true, opacity: 0.4, side: THREE.DoubleSide,
+        })
+      );
+      zoneMesh.rotation.x = -Math.PI / 2;
+      zoneMesh.position.set(jz.x, 0.1, jz.z);
+      g.add(zoneMesh);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(jz.radius * 0.9, jz.radius * 1.15, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0xb388ff, transparent: true, opacity: 0.72, side: THREE.DoubleSide,
+        })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(jz.x, 0.11, jz.z);
+      g.add(ring);
+
+      this.superJumpZones.push({ ...jz, mesh: zoneMesh, ring });
+    }
+
     // ===== スカイドーム / 観客席表現 =====
     const skyGeo = new THREE.SphereGeometry(360 * S, 24, 12, 0, Math.PI*2, 0, Math.PI/2);
     const skyMat = new THREE.MeshBasicMaterial({
@@ -383,6 +415,12 @@ const Arena = {
         p.ring.scale.set(pulse, pulse, 1);
       }
     }
+    for (const z of this.superJumpZones) {
+      if (!z || !z.ring || !z.mesh) continue;
+      const pulse = 1 + Math.sin(now / 220 + z.x * 0.03 + z.z * 0.03) * 0.1;
+      z.ring.scale.set(pulse, pulse, 1);
+      z.mesh.material.opacity = 0.32 + Math.max(0, pulse - 1) * 0.9;
+    }
   },
 
   consumePad(x, z) {
@@ -400,6 +438,17 @@ const Arena = {
       }
     }
     return 0;
+  },
+
+  getJumpBoostAt(x, z) {
+    let mult = 1;
+    for (const jz of this.superJumpZones) {
+      const dx = x - jz.x, dz = z - jz.z;
+      if (dx * dx + dz * dz <= jz.radius * jz.radius) {
+        if (jz.jumpMult > mult) mult = jz.jumpMult;
+      }
+    }
+    return mult;
   },
 
   // コーナー壁(XZ斜め線)との衝突を解決する。

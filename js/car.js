@@ -3,8 +3,8 @@
 // アクセル: 自動 ON。ブレーキ/バック: ジャイロのピッチ (端末を後ろに傾ける) で発動。
 const CarPhys = {
   // サイズ (一回り大きく: 操作中車をでかく見せるため少し大きく)
-  RADIUS: 4.8,
-  HEIGHT: 3.4,
+  RADIUS: 5.8,
+  HEIGHT: 4.2,
 
   // 速度パラメタ (操作感アップ + キビキビした応答)
   MAX_SPEED: 76,
@@ -94,7 +94,7 @@ class Car {
     const colorHex = parseInt(this.color.replace('#',''), 16);
 
     // ロケットリーグ風: 平たくワイドに。スケールアップして「でかく見せる」
-    const S = 3.4;
+    const S = 4.1;
 
     // ボディ
     const body = new THREE.Mesh(
@@ -365,7 +365,10 @@ class Car {
 
     // ===== ジャンプ (スプリングパワー所持で2倍 & 3段) =====
     const isSpring = this.activePower === 'spring';
-    const jumpMult = isSpring ? 1.8 : 1;
+    const zoneJumpMult = (typeof Arena !== 'undefined' && Arena.getJumpBoostAt)
+      ? Arena.getJumpBoostAt(this.x, this.z)
+      : 1;
+    const jumpMult = (isSpring ? 1.8 : 1) * zoneJumpMult;
     const maxJumps = isSpring ? 3 : 2;
     if (input) {
       if (this.onGround && input.jump) {
