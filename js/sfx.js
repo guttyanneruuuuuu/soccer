@@ -114,4 +114,20 @@ const SFX = {
   thud(power = 0.5) {
     this._noise(0.1, 0.18 * power, 400);
   },
+  // スーパーソニック発動
+  supersonic() {
+    this._osc('sawtooth', 180, 0.3, 0.25, 0.02, 0.15, 1200);
+    setTimeout(() => this._osc('square', 900, 0.2, 0.18, 0.005, 0.1, 1800), 80);
+    this._noise(0.3, 0.15, 3000);
+  },
+  // フリップ (回転シャキッと)
+  flip() {
+    this._osc('triangle', 320, 0.12, 0.22, 0.005, 0.05, 880);
+    this._noise(0.08, 0.1, 1200);
+  },
+  // コンボヒット (高音のキラッ)
+  combo(level = 1) {
+    const f = 800 + level * 110;
+    this._osc('square', f, 0.1, 0.2, 0.003, 0.05, f * 2);
+  },
 };

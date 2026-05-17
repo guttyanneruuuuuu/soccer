@@ -51,6 +51,15 @@ const Game = {
   // 統計情報 (per car: { goals, assists, demos, demoed })
   stats: new Map(),
 
+  // カメラモード ('chase' = 後方追従、'ball' = ボール視点 (車→ボール方向))
+  cameraMode: 'chase',
+  ballCamDefault: false,
+
+  // コンボシステム (ローカルプレイヤーの連続ヒット数)
+  comboCount: 0,
+  comboTimer: 0,
+  COMBO_WINDOW: 2.5, // 秒
+
   init() {
     this.canvas = document.getElementById('game-canvas');
     const scene = new THREE.Scene();
@@ -127,7 +136,23 @@ const Game = {
     // パーティクルプール初期化
     this._initParticlePool();
 
+    // カメラモード復元 (ローカルストレージ)
+    try {
+      const saved = localStorage.getItem('soccer-ballcam');
+      if (saved === '1') {
+        this.ballCamDefault = true;
+        this.cameraMode = 'ball';
+      }
+    } catch (_) {}
+
     window.addEventListener('resize', () => this._onResize());
+  },
+
+  toggleCameraMode() {
+    this.cameraMode = (this.cameraMode === 'chase') ? 'ball' : 'chase';
+    if (typeof showToast === 'function') {
+      showToast(this.cameraMode === 'ball' ? '🎥 ボール視点' : '🎥 通常視点', 900);
+    }
   },
 
   _wantAA() {
@@ -229,6 +254,12 @@ const Game = {
     document.getElementById('hud-time').textContent = Utils.formatTime(this.matchDuration * 1000);
     document.getElementById('finish-overlay').classList.remove('show');
 
+    // カメラデフォルト適用
+    this.cameraMode = this.ballCamDefault ? 'ball' : 'chase';
+    // コンボリセット
+    this.comboCount = 0;
+    this.comboTimer = 0;
+
     this.running = true;
     this.paused = false;
     this.lastFrameTime = performance.now();
@@ -314,14 +345,14 @@ const Game = {
 
   _frame(now) {
     if (!this.running) return;
-    let dt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
+    let rawDt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
     this.lastFrameTime = now;
+    let dt = rawDt;
     // スローモーション中は dt を縮める (描画は通常 fps、物理が遅くなる)
     if (this._slowmoT > 0) {
-      dt *= 0.45;
-      this._slowmoT = Math.max(0, this._slowmoT - (now - (this._lastSlowmoNow || now)) / 1000);
+      this._slowmoT = Math.max(0, this._slowmoT - rawDt);
+      dt = rawDt * 0.45;
     }
-    this._lastSlowmoNow = now;
     if (!this.paused) this.update(dt);
     this.render();
 
@@ -344,6 +375,20 @@ const Game = {
 
   update(dt) {
     Input.update(dt);
+
+    // カメラ切替リクエスト処理
+    if (Input.consumeCameraToggle()) {
+      this.toggleCameraMode();
+    }
+
+    // コンボタイマー: 時間切れでリセット
+    if (this.comboCount > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) {
+        this.comboCount = 0;
+        this._updateComboHUD();
+      }
+    }
 
     // タイマー破損の保険
     if (!Number.isFinite(this.kickoffCountdown)) this.kickoffCountdown = 0;
@@ -398,13 +443,14 @@ const Game = {
         brake: Input.brake,
         boost: Input.boost,
         jump: Input.consumeJump(),
+        airRoll: Input.airRoll,
       };
       this._lastLocalInput = inputState;
       this.localCar.update(dt, inputState);
       // ジャンプSFX
       if (inputState.jump) {
         if (this.localCar.jumpsUsed === 1) SFX.jump();
-        else SFX.doubleJump();
+        else { SFX.doubleJump(); SFX.flip && SFX.flip(); }
       }
     } else if (this.localCar) {
       // カウントダウン中はメッシュだけ更新 (空入力)
@@ -421,7 +467,7 @@ const Game = {
           continue;
         }
         let inp = this.remoteInputs.get(id);
-        if (!inp) inp = { steer: 0, accel: false, brake: false, boost: false, jump: false };
+        if (!inp) inp = { steer: 0, accel: false, brake: false, boost: false, jump: false, airRoll: false };
         car.update(dt, inp);
         if (inp.jump) inp.jump = false;
       }
@@ -478,6 +524,7 @@ const Game = {
         brake: Input.brake,
         boost: Input.boost,
         jump: this._lastLocalInput ? this._lastLocalInput.jump : false,
+        airRoll: Input.airRoll,
       }});
       // クライアントでもボールを軽く前進補間 (パケット間がカクつくのを防ぐ)
       if (!playLocked && this.ball) this.ball.clientPredict(dt);
@@ -521,8 +568,10 @@ const Game = {
     // パーティクル
     this._updateParticles(dt);
 
-    // パワーアップ更新 (ホストまたはソロのみがスポーン/判定)
-    if (typeof PowerUps !== 'undefined' && (Net.isHost || !Net.peer)) {
+    // パワーアップ更新: 全員アニメ実行、スポーン/判定はホストまたはソロのみ
+    // (PowerUps.update 自体がホストならスポーン、クライアントなら return で
+    //  アニメだけして接触判定をスキップする仕組みになっている)
+    if (typeof PowerUps !== 'undefined') {
       if (!playLocked) PowerUps.update(dt);
     }
     // 全車の有効パワー効果適用 (見た目はクライアントでもやりたい)
@@ -633,8 +682,28 @@ const Game = {
     else SFX.ballHit(Utils.clamp(hitSpeed / 40, 0.2, 1));
     if (car === this.localCar) {
       this.addCamShake(Utils.clamp(hitSpeed / 50, 0.1, 1.0));
+      // コンボ加算 (ローカル車だけ)
+      this.comboCount++;
+      this.comboTimer = this.COMBO_WINDOW;
+      this._updateComboHUD();
+      if (this.comboCount >= 2) SFX.combo(Math.min(this.comboCount, 6));
     }
     this._spawnHitParticles(this.ball.x, this.ball.y, this.ball.z, hitSpeed);
+  },
+
+  _updateComboHUD() {
+    const el = document.getElementById('combo-meter');
+    if (!el) return;
+    const countEl = document.getElementById('combo-count');
+    if (this.comboCount < 2) {
+      el.classList.remove('show', 'big');
+      return;
+    }
+    if (countEl) countEl.textContent = this.comboCount + 'x';
+    el.classList.add('show');
+    el.classList.remove('big');
+    void el.offsetWidth;
+    el.classList.add('big');
   },
 
   _spawnHitParticles(x, y, z, power) {
@@ -723,6 +792,14 @@ const Game = {
     this._slowmoT = 0.7; // 0.7秒スローモーション
     this._lastSlowmoNow = performance.now();
     SFX.goal();
+    // ゴール時にコンボリセット (味方ゴールならスペシャル演出)
+    const myTeam = this.localCar ? this.localCar.team : null;
+    if (myTeam === team && this.comboCount >= 2) {
+      showToast && showToast(`🌟 ${this.comboCount}x COMBO GOAL!`, 1600);
+    }
+    this.comboCount = 0;
+    this.comboTimer = 0;
+    this._updateComboHUD();
     // ゴール献身者検出 (ホストまたはソロのみ)
     if (Net.isHost || !Net.peer) {
       const scorerId = this.ball.lastHitter;
@@ -848,6 +925,10 @@ const Game = {
         c.activePower = null;
         c.powerTimer = 0;
         if (c._giantScale) { c.mesh.scale.set(1,1,1); c._giantScale = false; }
+        // 状態フラグもクリア
+        c.isSupersonic = false;
+        c.isFlipping = false;
+        if (c._ssTrail) c._ssTrail.material.opacity = 0;
         c.syncMesh();
       });
     };
@@ -865,61 +946,92 @@ const Game = {
 
   _updateCamera(dt) {
     const car = this.localCar;
-    // ===== ロケットリーグ風シネマティックカメラ =====
-    const baseBack = 21.0;
-    const baseUp   = 9.0;
     const sp = Math.abs(car.speed);
     const speedRatio = Utils.clamp(sp / CarPhys.MAX_SPEED, 0, 1);
     const boostRatio = Utils.clamp((sp - CarPhys.MAX_SPEED) / (CarPhys.MAX_SPEED_BOOST - CarPhys.MAX_SPEED), 0, 1);
 
-    const dynBack = baseBack + speedRatio * 8.0 + boostRatio * 5.0;
-    const dynUp   = baseUp   + speedRatio * 2.8;
+    let camX, camY, camZ, lookX, lookY, lookZ;
 
-    const airUp = car.onGround ? 0 : Math.min(8.0, (car.y - CarPhys.HEIGHT) * 0.2);
+    if (this.cameraMode === 'ball') {
+      // ===== ボール視点: カメラは「車→ボール」方向に向いて配置 =====
+      const dxb = this.ball.x - car.x;
+      const dzb = this.ball.z - car.z;
+      const dist = Math.sqrt(dxb*dxb + dzb*dzb);
+      let dirX = 0, dirZ = 1;
+      if (dist > 0.5) {
+        dirX = dxb / dist;
+        dirZ = dzb / dist;
+      } else {
+        // 接近時は車の向きを使う
+        dirX = Math.sin(car.angle);
+        dirZ = Math.cos(car.angle);
+      }
+      const baseBack = 24.0;
+      const baseUp = 11.0;
+      const dynBack = baseBack + speedRatio * 6.0;
+      const dynUp = baseUp + speedRatio * 2.2;
+      camX = car.x - dirX * dynBack;
+      camZ = car.z - dirZ * dynBack;
+      const airUp = car.onGround ? 0 : Math.min(8.0, (car.y - CarPhys.HEIGHT) * 0.2);
+      camY = car.y + dynUp + airUp;
+      // ボールを注視
+      lookX = this.ball.x;
+      lookY = this.ball.y + 1.5;
+      lookZ = this.ball.z;
+    } else {
+      // ===== 通常チェイス視点 =====
+      const baseBack = 21.0;
+      const baseUp   = 9.0;
+      const dynBack = baseBack + speedRatio * 8.0 + boostRatio * 5.0;
+      const dynUp   = baseUp   + speedRatio * 2.8;
+      const airUp = car.onGround ? 0 : Math.min(8.0, (car.y - CarPhys.HEIGHT) * 0.2);
+      camX = car.x - Math.sin(car.angle) * dynBack;
+      camZ = car.z - Math.cos(car.angle) * dynBack;
+      camY = car.y + dynUp + airUp;
 
-    const camX = car.x - Math.sin(car.angle) * dynBack;
-    const camZ = car.z - Math.cos(car.angle) * dynBack;
-    const camY = car.y + dynUp + airUp;
+      // ボールトラッキング (車の進行方向+ボール方向ブレンド)
+      const dxb = this.ball.x - car.x;
+      const dzb = this.ball.z - car.z;
+      const distBall = Math.sqrt(dxb*dxb + dzb*dzb);
 
+      const forwardLookDist = 26 + speedRatio * 14;
+      lookX = car.x + Math.sin(car.angle) * forwardLookDist;
+      lookZ = car.z + Math.cos(car.angle) * forwardLookDist;
+      lookY = car.y + 2.0;
+
+      const ballMaxDist = 240;
+      if (distBall < ballMaxDist) {
+        const fx = Math.sin(car.angle), fz = Math.cos(car.angle);
+        const bnx = dxb / Math.max(0.01, distBall);
+        const bnz = dzb / Math.max(0.01, distBall);
+        const dot = fx * bnx + fz * bnz;
+        const distW = Utils.clamp(1 - distBall / ballMaxDist, 0, 1);
+        const dirW  = Utils.clamp((dot + 0.3) / 1.3, 0, 1);
+        const w = distW * dirW * 0.6;
+        lookX = lookX * (1 - w) + this.ball.x * w;
+        lookY = lookY * (1 - w) + (this.ball.y + 1) * w;
+        lookZ = lookZ * (1 - w) + this.ball.z * w;
+      }
+    }
+
+    // 視点切替時に急に飛ばないよう、補間係数は速度に応じて
     const alpha = Utils.clamp(0.18 + speedRatio * 0.18, 0.18, 0.38);
     this.camera.position.x = Utils.lerp(this.camera.position.x, camX, alpha);
     this.camera.position.y = Utils.lerp(this.camera.position.y, camY, alpha);
     this.camera.position.z = Utils.lerp(this.camera.position.z, camZ, alpha);
 
-    // ===== ボールトラッキング =====
-    const dxb = this.ball.x - car.x;
-    const dzb = this.ball.z - car.z;
-    const distBall = Math.sqrt(dxb*dxb + dzb*dzb);
-
-    const forwardLookDist = 26 + speedRatio * 14;
-    let lookX = car.x + Math.sin(car.angle) * forwardLookDist;
-    let lookZ = car.z + Math.cos(car.angle) * forwardLookDist;
-    let lookY = car.y + 2.0;
-
-    const ballMaxDist = 240;
-    if (distBall < ballMaxDist) {
-      const fx = Math.sin(car.angle), fz = Math.cos(car.angle);
-      const bnx = dxb / Math.max(0.01, distBall);
-      const bnz = dzb / Math.max(0.01, distBall);
-      const dot = fx * bnx + fz * bnz;
-      const distW = Utils.clamp(1 - distBall / ballMaxDist, 0, 1);
-      const dirW  = Utils.clamp((dot + 0.3) / 1.3, 0, 1);
-      const w = distW * dirW * 0.6;
-      lookX = lookX * (1 - w) + this.ball.x * w;
-      lookY = lookY * (1 - w) + (this.ball.y + 1) * w;
-      lookZ = lookZ * (1 - w) + this.ball.z * w;
-    }
-
     if (!this._camLook) this._camLook = { x: lookX, y: lookY, z: lookZ };
-    this._camLook.x = Utils.lerp(this._camLook.x, lookX, 0.22);
-    this._camLook.y = Utils.lerp(this._camLook.y, lookY, 0.18);
-    this._camLook.z = Utils.lerp(this._camLook.z, lookZ, 0.22);
+    const lookAlpha = this.cameraMode === 'ball' ? 0.18 : 0.22;
+    this._camLook.x = Utils.lerp(this._camLook.x, lookX, lookAlpha);
+    this._camLook.y = Utils.lerp(this._camLook.y, lookY, lookAlpha * 0.85);
+    this._camLook.z = Utils.lerp(this._camLook.z, lookZ, lookAlpha);
 
     this.camera.lookAt(this._camLook.x, this._camLook.y, this._camLook.z);
 
     const baseFov = 68;
     const boostFovAdd = boostRatio * 10 + speedRatio * 5;
-    const targetFov = baseFov + boostFovAdd;
+    const ssFovAdd = (car.isSupersonic ? 4 : 0);
+    const targetFov = baseFov + boostFovAdd + ssFovAdd;
     this.camera.fov = Utils.lerp(this.camera.fov, targetFov, 0.08);
     this.camera.updateProjectionMatrix();
 
@@ -957,7 +1069,17 @@ const Game = {
     if (sv) {
       const sp = Math.round(Math.sqrt(car.vx**2 + car.vy**2 + car.vz**2) * 3.6);
       sv.textContent = sp;
+      sv.classList.toggle('supersonic', !!car.isSupersonic);
     }
+
+    // スーパーソニックインジケータ
+    const ssEl = document.getElementById('supersonic-indicator');
+    if (ssEl) ssEl.classList.toggle('show', !!car.isSupersonic);
+    // 発動時のSFX (エッジ検知)
+    if (car.isSupersonic && !this._lastSupersonic) {
+      SFX.supersonic && SFX.supersonic();
+    }
+    this._lastSupersonic = !!car.isSupersonic;
 
     const bi = document.getElementById('brake-indicator');
     if (bi) bi.classList.toggle('show', !!Input.brake);
@@ -970,7 +1092,66 @@ const Game = {
       arrow.classList.toggle('brake', !!Input.brake);
     }
 
-    // (キックオフ前カウントダウンの表示は _showCountdown / _showMiniCountdown に任せる)
+    // ボール方向インジケーター (画面外のとき、画面端で矢印)
+    this._updateBallIndicator();
+  },
+
+  // 画面外のボールへの矢印を画面端に出す
+  _updateBallIndicator() {
+    const el = document.getElementById('ball-indicator');
+    if (!el || !this.ball || !this.camera) return;
+    // ボールの3D位置をスクリーンに投影
+    const v = new THREE.Vector3(this.ball.x, this.ball.y, this.ball.z);
+    const camPos = this.camera.position;
+    // カメラより手前にあるかチェック
+    const camFwd = new THREE.Vector3();
+    this.camera.getWorldDirection(camFwd);
+    const toBall = new THREE.Vector3(v.x - camPos.x, v.y - camPos.y, v.z - camPos.z);
+    const fwdDot = camFwd.x * toBall.x + camFwd.y * toBall.y + camFwd.z * toBall.z;
+    v.project(this.camera);
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const sx = (v.x * 0.5 + 0.5) * W;
+    const sy = (-v.y * 0.5 + 0.5) * H;
+    // ボールが画面内に十分入っているなら矢印は不要
+    const onScreen = fwdDot > 0 && sx > 80 && sx < W - 80 && sy > 80 && sy < H - 120;
+    const dist = Math.sqrt(
+      (this.ball.x - this.localCar.x) ** 2 +
+      (this.ball.z - this.localCar.z) ** 2
+    );
+    if (onScreen) {
+      el.classList.remove('show');
+      return;
+    }
+    // 画面の中心から、ボール方向に向けてエッジに矢印を置く
+    const cx = W / 2, cy = H / 2;
+    let dx = sx - cx, dy = sy - cy;
+    if (fwdDot < 0) {
+      // 後ろ側にある: 強制的に画面下に出す
+      dx = -dx; dy = Math.abs(dy);
+      if (dy < 60) dy = 60;
+    }
+    const mag = Math.sqrt(dx*dx + dy*dy) || 1;
+    // 画面端の安全マージン
+    const marginX = 70, marginY = 90;
+    const maxX = W / 2 - marginX;
+    const maxY = H / 2 - marginY;
+    // 矢印位置を画面端にクランプ
+    const sxNorm = dx / mag;
+    const syNorm = dy / mag;
+    // 端まで延ばす倍率
+    const tX = Math.abs(sxNorm) > 0.001 ? maxX / Math.abs(sxNorm) : Infinity;
+    const tY = Math.abs(syNorm) > 0.001 ? maxY / Math.abs(syNorm) : Infinity;
+    const t = Math.min(tX, tY);
+    const px = cx + sxNorm * t;
+    const py = cy + syNorm * t;
+    el.style.left = (px - 30) + 'px';
+    el.style.top = (py - 30) + 'px';
+    el.style.marginLeft = '0';
+    el.style.marginTop = '0';
+    el.classList.add('show');
+    const distEl = el.querySelector('.ball-dist');
+    if (distEl) distEl.textContent = Math.round(dist) + 'm';
   },
 
   render() {
@@ -983,29 +1164,48 @@ const Game = {
 
     // 難易度パラメータ
     const diff = this.botDifficulty || 'normal';
-    const skill = diff === 'easy' ? 0.6 : (diff === 'hard' ? 1.15 : 1.0);
-    // easy: 反応遅め、ブースト控えめ
-    // hard: 機敏、エアプレー多用、ブースト多用
+    const skill = diff === 'easy' ? 0.55 : (diff === 'hard' ? 1.2 : 1.0);
 
     const ownGoalZ   = car.team === 'blue' ? -Arena.L/2 : Arena.L/2;
     const enemyGoalZ = -ownGoalZ;
     const ball = this.ball;
     const distToBall = Math.hypot(ball.x - car.x, ball.z - car.z);
 
+    // 同チームの他Bot/プレイヤーよりボールに近いか?
     let isClosest = true;
+    let closestDist = distToBall;
     for (const other of this.cars.values()) {
       if (other === car || other.team !== car.team || other.respawnTimer > 0) continue;
       const d = Math.hypot(ball.x - other.x, ball.z - other.z);
-      if (d < distToBall - 0.5) { isClosest = false; break; }
+      if (d < closestDist - 0.5) {
+        isClosest = false;
+        closestDist = d;
+      }
     }
 
     const ballDistOwn = Math.abs(ball.z - ownGoalZ);
     const ballHeadingOwn = (ownGoalZ < 0 && ball.vz < -2) || (ownGoalZ > 0 && ball.vz > 2);
     const emergencyDefense = ballDistOwn < 32 && ballHeadingOwn;
 
+    // 危険な敵が自陣ボール近くに居るか? (ハード難易度はマーキング意識)
+    let dangerEnemy = null;
+    if (diff !== 'easy') {
+      let dmin = 999;
+      for (const other of this.cars.values()) {
+        if (other.team === car.team || other.respawnTimer > 0) continue;
+        const d = Math.hypot(ball.x - other.x, ball.z - other.z);
+        if (d < dmin && d < 28) { dmin = d; dangerEnemy = other; }
+      }
+    }
+
     let targetX, targetZ;
     let wantBoost = false;
     let wantJump  = false;
+
+    // ボール予測位置 (Hard では先読み)
+    const predictT = diff === 'hard' ? 0.45 : (diff === 'normal' ? 0.22 : 0.05);
+    const predX = ball.x + ball.vx * predictT;
+    const predZ = ball.z + ball.vz * predictT;
 
     if (emergencyDefense || (!isClosest && ballDistOwn < 42)) {
       // 守備
@@ -1019,38 +1219,50 @@ const Game = {
       }
     } else if (isClosest) {
       // 攻撃: ボールの「敵ゴール反対側」に回り込んでから敵ゴール方向に打つ
-      // ボール→敵ゴールベクトルを計算して、ボールの自陣側に "待機点" を取る
-      const bgx = 0 - ball.x;            // ボール→敵ゴール中央 (X)
-      const bgz = enemyGoalZ - ball.z;   // ボール→敵ゴール中央 (Z)
+      // ボール予測位置→敵ゴール中央のベクトル
+      const bgx = 0 - predX;
+      const bgz = enemyGoalZ - predZ;
       const bgLen = Math.hypot(bgx, bgz) || 1;
       const bgnx = bgx / bgLen, bgnz = bgz / bgLen;
-      // 反対方向に少し下がった位置を目標に
       const approachDist = 8;
-      targetX = ball.x - bgnx * approachDist;
-      targetZ = ball.z - bgnz * approachDist;
+      targetX = predX - bgnx * approachDist;
+      targetZ = predZ - bgnz * approachDist;
       if (distToBall < 8) {
         // 接触圏内: ボールを敵ゴール中央方向に押す
         targetX = ball.x + bgnx * 4;
         targetZ = ball.z + bgnz * 6;
         wantBoost = car.boost > 30 && diff !== 'easy';
-      } else if (distToBall < 30) {
+      } else if (distToBall < 35) {
         wantBoost = car.boost > 40 * (diff === 'easy' ? 1.5 : 1);
       }
     } else {
       // サポート
-      targetX = ball.x * 0.4;
-      targetZ = ball.z + (enemyGoalZ > 0 ? -14 : 14);
+      // 敵が居るならマーキング (ハードのみ)、それ以外は敵ゴール側に待機 + ブーストパッド集め
+      if (dangerEnemy && diff === 'hard') {
+        // 敵とゴールの間に位置取り
+        const ex = dangerEnemy.x, ez = dangerEnemy.z;
+        targetX = (ex + 0) / 2;
+        targetZ = (ez + ownGoalZ) / 2;
+      } else {
+        targetX = ball.x * 0.4;
+        targetZ = ball.z + (enemyGoalZ > 0 ? -14 : 14);
+      }
       if (car.boost < 55) {
+        let bestPad = null, bestD = 999;
         for (const p of Arena.boostPads) {
-          if (!p.active || !p.big) continue;
+          if (!p.active) continue;
+          if (!p.big && car.boost > 40) continue;
           const d = Math.hypot(p.x - car.x, p.z - car.z);
-          if (d < 30) { targetX = p.x; targetZ = p.z; break; }
+          // ペナルティ: 敵陣すぎるパッドは取らない
+          const oneOwnSide = (p.z * (ownGoalZ < 0 ? 1 : -1)) > -10;
+          if (oneOwnSide && d < bestD && d < 50) { bestPad = p; bestD = d; }
         }
+        if (bestPad) { targetX = bestPad.x; targetZ = bestPad.z; }
       }
     }
 
     // ステアリング (難易度で精度ノイズ)
-    const noise = (diff === 'easy' ? 0.45 : (diff === 'hard' ? 0.08 : 0.18)) * (Math.random() - 0.5);
+    const noise = (diff === 'easy' ? 0.45 : (diff === 'hard' ? 0.06 : 0.16)) * (Math.random() - 0.5);
     const dx = targetX - car.x;
     const dz = targetZ - car.z;
     const dist = Math.sqrt(dx*dx + dz*dz);
@@ -1063,16 +1275,30 @@ const Game = {
     let brake = (Math.abs(da) > Math.PI * 0.72 && dist < 9);
 
     // エアプレー
-    const jumpChance = diff === 'easy' ? 0.15 : (diff === 'hard' ? 0.75 : 0.5);
-    if (ball.y > 8 && distToBall < 14 && car.onGround && Math.random() < jumpChance) {
+    const jumpChance = diff === 'easy' ? 0.12 : (diff === 'hard' ? 0.78 : 0.5);
+    if (ball.y > 8 && distToBall < 15 && car.onGround && Math.random() < jumpChance) {
       wantJump = true;
     }
-    if (!car.onGround && car.jumpsUsed === 1 && distToBall < 7 && ball.y > car.y - 2 && Math.random() < 0.18 * skill) {
+    if (!car.onGround && car.jumpsUsed === 1 && distToBall < 8 && ball.y > car.y - 2 && Math.random() < 0.2 * skill) {
       wantJump = true;
     }
 
     // キックオフ突撃
     if (this.matchTime < 1.2 && isClosest) { wantBoost = true; brake = false; }
+
+    // デモリッション狙い (Hard のみ、自陣で危険な敵が居て自分は守備でない時)
+    if (diff === 'hard' && dangerEnemy && !isClosest && car.boost > 60) {
+      const dToEnemy = Math.hypot(dangerEnemy.x - car.x, dangerEnemy.z - car.z);
+      // 後ろから接近できる時のみ
+      if (dToEnemy < 50 && dToEnemy > 12) {
+        // 敵への角度
+        const eda = Math.atan2(dangerEnemy.x - car.x, dangerEnemy.z - car.z) - car.angle;
+        let edaN = eda;
+        while (edaN > Math.PI) edaN -= Math.PI * 2;
+        while (edaN < -Math.PI) edaN += Math.PI * 2;
+        if (Math.abs(edaN) < 0.4) wantBoost = true;
+      }
+    }
 
     car.update(dt, {
       steer,
@@ -1080,6 +1306,7 @@ const Game = {
       brake,
       boost: wantBoost && car.boost > 5 && Math.abs(da) < 0.6,
       jump: wantJump,
+      airRoll: false,
     });
   },
 };

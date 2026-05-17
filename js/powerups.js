@@ -20,7 +20,8 @@ const PowerUps = {
   // フィールド上のボックス
   boxes: [],
   spawnTimer: 0,
-  spawnInterval: 14, // 秒
+  spawnInterval: 11, // 秒 (14 → 11、もう少し頻繁に)
+  maxBoxes: 4,       // 同時最大 (3 → 4)
   scene: null,
   enabled: true,
 
@@ -65,9 +66,9 @@ const PowerUps = {
   update(dt) {
     if (!this.enabled || !this.scene) return;
     this.spawnTimer -= dt;
-    if (this.spawnTimer <= 0 && this.boxes.length < 3) {
+    if (this.spawnTimer <= 0 && this.boxes.length < this.maxBoxes) {
       const box = this._spawnBox();
-      this.spawnTimer = this.spawnInterval + Math.random() * 6;
+      this.spawnTimer = this.spawnInterval + Math.random() * 5;
       // クライアントへスポーン通知 (ホストのみ)
       if (Net.peer && Net.isHost && box) {
         Net._broadcast({

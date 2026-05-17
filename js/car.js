@@ -1,41 +1,52 @@
-// ============= 車（racegame の車体メッシュを流用し、ロケットリーグ風物理を実装） =============
-// 「車も一回り大きく」「ジャイロのみで操作」「自動アクセル」「ジャンプボタンのみ」を実現。
-// アクセル: 自動 ON。ブレーキ/バック: ジャイロのピッチ (端末を後ろに傾ける) で発動。
+// ============= 車 (ロケットリーグ風物理) =============
+// スマホ操作前提:
+//   - アクセル: ACCELボタン (右下) ホールド
+//   - ブレーキ/バック: ジャイロ後傾
+//   - ブースト: BOOSTボタン (右中) ホールド
+//   - ステア: ジャイロ左右
+//   - 空中ピッチ: ジャイロ前後傾
+//   - 空中ロール: AIR ROLLボタン押している間、ステアをロール回転に切替
+//   - ジャンプ/フリップ: JUMPボタン
 const CarPhys = {
-  // サイズ (一回り大きく: 操作中車をでかく見せるため少し大きく)
+  // サイズ (ボディスケール 3.4 × ベース寸法 ≒ 全長 ~12m / 半径 4.8m)
   RADIUS: 4.8,
   HEIGHT: 3.4,
 
-  // 速度パラメタ (操作感アップ + キビキビした応答)
-  MAX_SPEED: 76,
-  MAX_SPEED_BOOST: 100,
-  ACCEL: 64,             // 60 → 64: 加速ややキビキビ
-  REVERSE_ACCEL: 28,
-  BRAKE: 78,             // 62 → 78: ブレーキを強めに (急停止可能)
-  FRICTION: 3.4,
-  AIR_FRICTION: 0.34,
-  STEER_SPEED: 3.25,     // 3.0 → 3.25: 旋回はやや速く
-  STEER_AT_SPEED: 0.55,  // 高速時のステア効きを下げて挙動安定
+  // 速度パラメタ
+  MAX_SPEED: 78,            // 通常上限
+  MAX_SPEED_BOOST: 105,     // ブースト最大
+  SUPERSONIC_SPEED: 82,     // この速度を超えるとスーパーソニック演出
+  ACCEL: 70,                // 加速度
+  REVERSE_ACCEL: 30,        // バックの加速
+  BRAKE: 88,                // ブレーキ強度
+  FRICTION: 3.6,            // 何もしない時の減速
+  AIR_FRICTION: 0.30,       // 空中の空気抵抗
+  STEER_SPEED: 3.35,        // ハンドル切る速度
+  STEER_AT_SPEED: 0.55,     // 高速時のステア効きを下げて挙動安定
   LATERAL_GRIP: 11.0,
-  // 低速での旋回ボーナス (止まりかけでクイック切返し可能)
-  STEER_LOW_SPEED_BONUS: 1.4,
+  STEER_LOW_SPEED_BONUS: 1.45,  // 低速時の旋回ボーナス
 
-  // 物理 (ジャンプ強化)
+  // 空中
   GRAVITY: 42,
-  JUMP_VEL: 31,           // 初段でおよそ y+11 前後まで上がる体感に調整
-  DOUBLE_JUMP_VEL: 27,    // 2段目でも高度をしっかり維持できる値に調整
-  AIR_PITCH_SPEED: 5.2,   // 空中ピッチ速度アップ
-  AIR_ROLL_SPEED: 5.2,    // 空中ロール速度アップ
+  JUMP_VEL: 32,             // 初段ジャンプ
+  DOUBLE_JUMP_VEL: 28,      // 2段目
+  AIR_PITCH_SPEED: 5.4,
+  AIR_ROLL_SPEED: 5.6,      // ロール速度 (新規)
+  AIR_YAW_SPEED: 4.4,       // 空中ヨー (通常ステア時)
 
-  // ブースト (もう少し強く・出る量も多く)
-  BOOST_FORCE: 110,
-  BOOST_PER_SEC: 40,
-  BOOST_MAX: 120,
-  BOOST_INITIAL: 50,      // 33 → 50 (試合開始で動きやすく)
+  // ブースト
+  BOOST_FORCE: 118,         // ブースト推力 (++)
+  BOOST_PER_SEC: 38,        // 燃料消費
+  BOOST_MAX: 100,           // 最大100に統一 (HUD互換)
+  BOOST_INITIAL: 50,
+  BOOST_MIN_HOLD: 0.10,     // 燃料0でも最低0.1秒は炎の見た目を維持
+  // 壁
   WALL_BOUNCE: 0.18,
   WALL_SPEED_KEEP: 0.9,
   WALL_CLIMB_MIN_IMPACT: 6,
   WALL_CLIMB_VEL: 8.2,
+  // 二段ジャンプ時の追加推進
+  FLIP_FORWARD_VEL: 14,     // フリップ前進加速 (10 → 14)
 };
 
 class Car {
@@ -54,9 +65,9 @@ class Car {
     this.vx = 0;
     this.vy = 0;
     this.vz = 0;
-    this.angle = opts.angle || 0;    // Y軸回転(ヨー)
-    this.pitch = 0;
-    this.roll = 0;
+    this.angle = opts.angle || 0;    // ヨー
+    this.pitch = 0;                  // ピッチ (機首上下)
+    this.roll = 0;                   // ロール (左右回転)
 
     this.speed = 0;
     this.onGround = true;
@@ -64,25 +75,29 @@ class Car {
     // ジャンプ
     this.jumpsUsed = 0;
     this.airTime = 0;
+    this._jumpEdgeTimer = 0;  // ジャンプ後の入力エッジ判定保護
 
     // ブースト
     this.boost = CarPhys.BOOST_INITIAL;
     this.boostMax = CarPhys.BOOST_MAX;
+    this._lastBoostTime = 0;
 
-    // ボールとの衝突クールダウン
+    // ボール衝突クールダウン
     this.ballHitCooldown = 0;
 
     // ゴール後の入力ロック
     this.lockTimer = 0;
-
-    // 反射衝突カウンタ
-    this.lastDemoTime = 0;
 
     // デモリッション後リスポーン
     this.respawnTimer = 0;
     this._spawnX = opts.x || 0;
     this._spawnZ = opts.z || 0;
     this._spawnAngle = opts.angle || 0;
+
+    // 状態フラグ (game.jsから観測)
+    this.isSupersonic = false;
+    this.isFlipping = false;
+    this._flipDir = 0;
 
     this.mesh = this._buildMesh();
     this.mesh.position.set(this.x, this.y, this.z);
@@ -213,6 +228,19 @@ class Car {
     this.flames = [fl1, fl2];
     this.flamesInner = [fl1i, fl2i];
 
+    // ===== スーパーソニックトレイル (ローカル車のみ) =====
+    if (this.isLocal) {
+      const ssMat = new THREE.MeshBasicMaterial({
+        color: 0xffeb3b, transparent: true, opacity: 0,
+      });
+      const ssGeo = new THREE.ConeGeometry(0.85 * S, 3.2 * S, 8);
+      const ssTrail = new THREE.Mesh(ssGeo, ssMat);
+      ssTrail.position.set(0, -0.2 * S, -2.6 * S);
+      ssTrail.rotation.x = -Math.PI / 2;
+      group.add(ssTrail);
+      this._ssTrail = ssTrail;
+    }
+
     // ===== 車下部のグロー (ローカル車にのみ装着) =====
     if (this.isLocal) {
       const underGlowGeo = new THREE.PlaneGeometry(2.4 * S, 4.0 * S);
@@ -271,7 +299,7 @@ class Car {
         this.y = CarPhys.HEIGHT;
         this.angle = this._spawnAngle;
         this.pitch = 0; this.roll = 0;
-        this.boost = Math.max(this.boost, CarPhys.BOOST_INITIAL);
+        this.boost = Math.max(this.boost, CarPhys.BOOST_INITIAL + 10);
         this.mesh.visible = true;
         this.onGround = true;
         this.jumpsUsed = 0;
@@ -280,6 +308,8 @@ class Car {
       return;
     }
 
+    if (this._jumpEdgeTimer > 0) this._jumpEdgeTimer -= dt;
+
     // ===== 操舵 =====
     if (input) {
       const speedRatio = Math.min(1, Math.abs(this.speed) / CarPhys.MAX_SPEED);
@@ -287,33 +317,40 @@ class Car {
       if (this.onGround) {
         // 地上はヨー (ハンドル) — 後進中は逆向きに効くと自然
         const dir = this.speed >= 0 ? 1 : -1;
-        // 低速で旋回しやすく (止まっていれば即その場で回頭)
+        // 低速で旋回しやすく
         const lowSpeedBoost = 1 + (1 - speedRatio) * (CarPhys.STEER_LOW_SPEED_BONUS - 1);
         this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * lowSpeedBoost * dir * dt;
-        // 地上のロール演出 (見た目だけ。コーナリングで車体が傾く)
-        const targetRoll = -input.steer * Math.min(0.18, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.25);
+        // 地上のロール演出
+        const targetRoll = -input.steer * Math.min(0.22, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.28);
         this.roll = Utils.lerp(this.roll, targetRoll, dt * 6);
       } else {
-        // 空中: ジャイロのsteer をエア・ヨー(横回転) として使う
-        // ピッチ(縦回転)は input.brake(後傾)で上向き、加速トリガー(前傾)で下向き
-        // → ジャイロのpitchは Input.pitch から取れるので利用する
-        this.angle += input.steer * CarPhys.AIR_ROLL_SPEED * 0.85 * dt;
-        // 軽くロールで見た目変化
-        const targetRoll = -input.steer * 0.5;
-        this.roll = Utils.lerp(this.roll, targetRoll, dt * 5);
-        // 空中ピッチ: Input.pitch が利用可能なら使う (端末を起こす=機首上げ)
+        // 空中: AIR ROLLボタン押下中は steer をロールとして使う
+        // それ以外は steer をヨー(横回転)、pitchを縦回転として使う
+        const airRoll = !!input.airRoll;
+        if (airRoll) {
+          // ロール (左右にゴロンと回る)
+          this.roll += input.steer * CarPhys.AIR_ROLL_SPEED * dt;
+        } else {
+          // 通常: ヨー (左右回頭)
+          this.angle += input.steer * CarPhys.AIR_YAW_SPEED * dt;
+          // ロールは見た目程度に
+          const targetRoll = -input.steer * 0.4;
+          this.roll = Utils.lerp(this.roll, targetRoll, dt * 4);
+        }
+        // ピッチ (機首上下) - 端末ピッチを入力に使う
         const airPitchInput = (typeof Input !== 'undefined') ? (Input.pitch || 0) : 0;
-        // input.brake もピッチアップ補助
         const pitchSteer = airPitchInput + (input.brake ? 0.6 : 0);
         this.pitch += pitchSteer * CarPhys.AIR_PITCH_SPEED * dt;
-        // ピッチを±π/2 にクランプ (機首が下方向に1回転すると挙動が壊れる)
+        // ピッチを正規化
         if (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
         if (this.pitch < -Math.PI) this.pitch += Math.PI * 2;
+        // ロールも正規化
+        if (this.roll > Math.PI) this.roll -= Math.PI * 2;
+        if (this.roll < -Math.PI) this.roll += Math.PI * 2;
       }
     }
 
-    // ===== アクセル入力 + ピッチによるブレーキ =====
-    // input.accel (ACCELボタン/キー) で前進。input.brake (ジャイロ後傾) で減速/バック。
+    // ===== アクセル + ブレーキ =====
     if (input && this.onGround) {
       if (input.brake) {
         if (this.speed > 0) this.speed -= CarPhys.BRAKE * dt;
@@ -321,7 +358,6 @@ class Car {
       } else if (input.accel) {
         this.speed += CarPhys.ACCEL * dt;
       } else {
-        // フリクション
         const f = CarPhys.FRICTION * dt;
         if (this.speed > 0) this.speed = Math.max(0, this.speed - f);
         else this.speed = Math.min(0, this.speed + f);
@@ -333,19 +369,21 @@ class Car {
     if (input && input.boost && this.boost > 0) {
       boosting = true;
       this.boost = Math.max(0, this.boost - CarPhys.BOOST_PER_SEC * dt);
+      this._lastBoostTime = CarPhys.BOOST_MIN_HOLD; // 燃料切れ時もしばらく炎を維持
       // 前進方向(車の向き)に推力
       const fx = Math.sin(this.angle), fz = Math.cos(this.angle);
       if (this.onGround) {
-        this.speed += CarPhys.BOOST_FORCE * 0.6 * dt;
+        this.speed += CarPhys.BOOST_FORCE * 0.62 * dt;
       } else {
-        // 空中はベクトル推力 (前方)
-        // 機体ピッチも反映する: 前方ベクトルを (cos pitch * fx, -sin pitch, cos pitch * fz) に
         const cp = Math.cos(this.pitch);
         const sp_ = Math.sin(this.pitch);
         this.vx += fx * cp * CarPhys.BOOST_FORCE * dt;
         this.vy += -sp_  * CarPhys.BOOST_FORCE * dt;
         this.vz += fz * cp * CarPhys.BOOST_FORCE * dt;
       }
+    } else if (this._lastBoostTime > 0) {
+      this._lastBoostTime -= dt;
+      boosting = this._lastBoostTime > 0;
     }
 
     // 炎エフェクト
@@ -363,7 +401,7 @@ class Car {
     if (this.speed > maxV) this.speed = maxV;
     if (this.speed < -CarPhys.MAX_SPEED * 0.5) this.speed = -CarPhys.MAX_SPEED * 0.5;
 
-    // ===== ジャンプ (スプリングパワー所持で2倍 & 3段) =====
+    // ===== ジャンプ =====
     const isSpring = this.activePower === 'spring';
     const jumpMult = isSpring ? 1.8 : 1;
     const maxJumps = isSpring ? 3 : 2;
@@ -373,16 +411,40 @@ class Car {
         this.onGround = false;
         this.jumpsUsed = 1;
         this.airTime = 0;
-      } else if (!this.onGround && this.jumpsUsed < maxJumps && input.jump) {
-        // ダブルジャンプ: フリップ風 (前方向に少し推進力 + ピッチ)
+        this._jumpEdgeTimer = 0.08;
+      } else if (!this.onGround && this.jumpsUsed < maxJumps && input.jump && this._jumpEdgeTimer <= 0) {
+        // ダブルジャンプ: フリップ風
         this.vy = CarPhys.DOUBLE_JUMP_VEL * jumpMult;
         this.jumpsUsed++;
-        // 進行方向にブースト
-        const fx = Math.sin(this.angle), fz = Math.cos(this.angle);
-        this.vx += fx * 10;
-        this.vz += fz * 10;
-        // ピッチ回転 (見た目フリップ)
-        this.pitch += Math.PI * 0.65;
+        this.isFlipping = true;
+        // フリップ方向: ステア入力で前/横方向に切替
+        // steer が大きいなら横フリップ、ほぼ0なら前フリップ
+        const lateral = Math.abs(input.steer);
+        let fx, fz;
+        if (lateral > 0.45) {
+          // 横フリップ (左右)
+          const side = input.steer < 0 ? 1 : -1; // ステア左ならX-側へ
+          fx = Math.cos(this.angle) * side;
+          fz = -Math.sin(this.angle) * side;
+          this.roll += Math.PI * 0.6 * side;
+        } else if (input.brake) {
+          // 後ろフリップ (バックフリップ)
+          fx = -Math.sin(this.angle);
+          fz = -Math.cos(this.angle);
+          this.pitch -= Math.PI * 0.55;
+        } else {
+          // 前フリップ
+          fx = Math.sin(this.angle);
+          fz = Math.cos(this.angle);
+          this.pitch += Math.PI * 0.65;
+        }
+        const fv = CarPhys.FLIP_FORWARD_VEL;
+        this.vx += fx * fv;
+        this.vz += fz * fv;
+        this._jumpEdgeTimer = 0.08;
+        this._flipDir = input.brake ? -1 : 1;
+        // フリップ終了タイマー (アニメ判定用)
+        setTimeout(() => { this.isFlipping = false; }, 350);
       }
     }
 
@@ -393,7 +455,6 @@ class Car {
       this.vy = 0;
       this.y = CarPhys.HEIGHT;
     } else {
-      // 空中: 重力 + 空気抵抗
       this.vy -= CarPhys.GRAVITY * dt;
       this.vx *= (1 - CarPhys.AIR_FRICTION * dt);
       this.vz *= (1 - CarPhys.AIR_FRICTION * dt);
@@ -417,9 +478,9 @@ class Car {
         this.jumpsUsed = 0;
         // 着地時 speed = 前進方向成分
         this.speed = this.vx * Math.sin(this.angle) + this.vz * Math.cos(this.angle);
-        // 機体姿勢: 上下逆転していれば一気にリセット、そうでなければスムーズに
-        if (Math.abs(this.pitch) > Math.PI / 2 + 0.4 || Math.abs(this.roll) > Math.PI / 2 + 0.4) {
-          // ハードランディング (一瞬スピード減)
+        // ハードランディング判定
+        const upsideDown = Math.abs(this.pitch) > Math.PI / 2 + 0.4 || Math.abs(this.roll) > Math.PI / 2 + 0.4;
+        if (upsideDown) {
           this.speed *= 0.55;
           if (typeof Game !== 'undefined' && this.isLocal) Game.addCamShake && Game.addCamShake(0.35);
         }
@@ -440,6 +501,20 @@ class Car {
 
     // ===== クールダウン =====
     if (this.ballHitCooldown > 0) this.ballHitCooldown -= dt;
+
+    // ===== スーパーソニック判定 =====
+    const curSpeed = Math.sqrt(this.vx*this.vx + this.vy*this.vy + this.vz*this.vz);
+    // ヒステリシス (一度発動したら速度がやや下がっても維持)
+    if (this.isSupersonic) {
+      this.isSupersonic = curSpeed > CarPhys.SUPERSONIC_SPEED * 0.92;
+    } else {
+      this.isSupersonic = curSpeed > CarPhys.SUPERSONIC_SPEED;
+    }
+    // スーパーソニックトレイル表示
+    if (this._ssTrail) {
+      const targetOpacity = this.isSupersonic ? 0.85 : 0;
+      this._ssTrail.material.opacity = Utils.lerp(this._ssTrail.material.opacity, targetOpacity, 0.15);
+    }
 
     // ===== タイヤ回転 (見た目) =====
     const wheelSpin = this.speed * dt * 1.4;
@@ -554,10 +629,12 @@ class Car {
     };
   }
 
-  // ボール衝突の見た目フィードバック
+  // ボール衝突の見た目フィードバック + 軽い反作用
   bumpFromBall(power) {
     const k = Math.min(1, power / 30);
-    this.pitch += (Math.random() - 0.5) * 0.4 * k;
-    this.roll  += (Math.random() - 0.5) * 0.4 * k;
+    this.pitch += (Math.random() - 0.5) * 0.35 * k;
+    this.roll  += (Math.random() - 0.5) * 0.35 * k;
+    // 重い当たりは車も少し押し返される (打感UP)
+    // game.js から呼ばれる位置で衝突法線が分かるが、ここでは見た目だけ
   }
 }

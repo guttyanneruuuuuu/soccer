@@ -118,6 +118,16 @@ const App = {
       document.getElementById('gyro-permission').classList.remove('show');
     });
 
+    // カメラ視点切替ボタン
+    const cameraBtn = document.getElementById('btn-camera');
+    if (cameraBtn) {
+      cameraBtn.addEventListener('click', () => {
+        if (typeof Game !== 'undefined' && Game.running) {
+          Game.toggleCameraMode();
+        }
+      });
+    }
+
     // ゲーム内設定
     document.getElementById('btn-recalibrate').addEventListener('click', () => {
       Input.recalibrate();
@@ -144,6 +154,23 @@ const App = {
     if (sensAutoBoost) {
       sensAutoBoost.checked = Input.autoBoost;
       sensAutoBoost.addEventListener('change', () => Input.setAutoBoost(sensAutoBoost.checked));
+    }
+    const sensAutoAccel = document.getElementById('sens-autoaccel');
+    if (sensAutoAccel) {
+      sensAutoAccel.checked = Input.autoAccel;
+      sensAutoAccel.addEventListener('change', () => Input.setAutoAccel(sensAutoAccel.checked));
+    }
+    const sensBallcam = document.getElementById('sens-ballcam');
+    if (sensBallcam) {
+      try {
+        sensBallcam.checked = localStorage.getItem('soccer-ballcam') === '1';
+      } catch (_) {}
+      sensBallcam.addEventListener('change', () => {
+        try { localStorage.setItem('soccer-ballcam', sensBallcam.checked ? '1' : '0'); } catch (_) {}
+        Game.ballCamDefault = sensBallcam.checked;
+        // 現在ゲーム中なら即時反映
+        if (Game.running) Game.cameraMode = sensBallcam.checked ? 'ball' : 'chase';
+      });
     }
     const sensCurve = document.getElementById('sens-curve');
     const sensCurveVal = document.getElementById('sens-curve-val');
@@ -208,11 +235,13 @@ const App = {
       }
     } catch (_) {}
 
-    // デバッグキー: G=自分側にゴール強制 / O=相手側にゴール強制 / Tab=スコア倍速
+    // デバッグキー
     window.addEventListener('keydown', (e) => {
       if (!Game.running) return;
+      // 入力中なら無視
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.key === 'g' && e.ctrlKey) {
-        // Ctrl+G: ボールをBLUE側ゴールに飛ばす
         if (Game.ball) {
           Game.ball.x = 0;
           Game.ball.y = BallPhys.RADIUS + 6;
