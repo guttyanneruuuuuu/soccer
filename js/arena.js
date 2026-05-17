@@ -3,6 +3,16 @@
 // この実寸を踏襲しつつ、空中プレーが楽しめるよう天井を高めに 42m に設定。
 // Z軸: 長辺(ゴール方向)。X軸: 短辺。Y軸: 上方向。
 const ARENA_SCALE = 7.0;
+const SUPER_JUMP_CENTER_RADIUS = 4.2;
+const SUPER_JUMP_SIDE_RADIUS = 3.6;
+const SUPER_JUMP_CENTER_MULT = 3.2;
+const SUPER_JUMP_SIDE_MULT = 2.8;
+const SUPER_JUMP_SIDE_OFFSET = 18;
+const SUPER_JUMP_PULSE_SPEED = 220;
+const SUPER_JUMP_PULSE_PHASE = 0.03;
+const SUPER_JUMP_PULSE_AMPLITUDE = 0.1;
+const SUPER_JUMP_BASE_OPACITY = 0.32;
+const SUPER_JUMP_OPACITY_GAIN = 0.9;
 
 const Arena = {
   SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
@@ -315,9 +325,9 @@ const Arena = {
     // ===== スーパージャンプゾーン =====
     this.superJumpZones = [];
     const jumpZones = [
-      { x: 0, z: 0, radius: 4.2 * S, jumpMult: 3.2 },
-      { x: -18 * S, z: 0, radius: 3.6 * S, jumpMult: 2.8 },
-      { x:  18 * S, z: 0, radius: 3.6 * S, jumpMult: 2.8 },
+      { x: 0, z: 0, radius: SUPER_JUMP_CENTER_RADIUS * S, jumpMult: SUPER_JUMP_CENTER_MULT },
+      { x: -SUPER_JUMP_SIDE_OFFSET * S, z: 0, radius: SUPER_JUMP_SIDE_RADIUS * S, jumpMult: SUPER_JUMP_SIDE_MULT },
+      { x:  SUPER_JUMP_SIDE_OFFSET * S, z: 0, radius: SUPER_JUMP_SIDE_RADIUS * S, jumpMult: SUPER_JUMP_SIDE_MULT },
     ];
     for (const jz of jumpZones) {
       const zoneMesh = new THREE.Mesh(
@@ -417,9 +427,9 @@ const Arena = {
     }
     for (const z of this.superJumpZones) {
       if (!z || !z.ring || !z.mesh) continue;
-      const pulse = 1 + Math.sin(now / 220 + z.x * 0.03 + z.z * 0.03) * 0.1;
+      const pulse = 1 + Math.sin(now / SUPER_JUMP_PULSE_SPEED + z.x * SUPER_JUMP_PULSE_PHASE + z.z * SUPER_JUMP_PULSE_PHASE) * SUPER_JUMP_PULSE_AMPLITUDE;
       z.ring.scale.set(pulse, pulse, 1);
-      z.mesh.material.opacity = 0.32 + Math.max(0, pulse - 1) * 0.9;
+      z.mesh.material.opacity = SUPER_JUMP_BASE_OPACITY + Math.max(0, pulse - 1) * SUPER_JUMP_OPACITY_GAIN;
     }
   },
 
