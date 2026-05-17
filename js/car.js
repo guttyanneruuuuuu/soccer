@@ -7,11 +7,11 @@ const CarPhys = {
   HEIGHT: 3.4,
 
   // 速度パラメタ (操作感アップ)
-  MAX_SPEED: 34,          // 全体テンポを落とす
-  MAX_SPEED_BOOST: 52,    // ブースト時も抑えめ
-  ACCEL: 28,
-  REVERSE_ACCEL: 18,
-  BRAKE: 50,
+  MAX_SPEED: 50,
+  MAX_SPEED_BOOST: 78,
+  ACCEL: 42,
+  REVERSE_ACCEL: 26,
+  BRAKE: 62,
   FRICTION: 3.1,
   AIR_FRICTION: 0.34,
   STEER_SPEED: 3.0,
@@ -26,7 +26,7 @@ const CarPhys = {
   AIR_ROLL_SPEED: 5.2,    // 空中ロール速度アップ
 
   // ブースト (もう少し強く・出る量も多く)
-  BOOST_FORCE: 62,
+  BOOST_FORCE: 90,
   BOOST_PER_SEC: 28,
   BOOST_MAX: 100,
   BOOST_INITIAL: 50,      // 33 → 50 (試合開始で動きやすく)

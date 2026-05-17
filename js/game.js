@@ -569,8 +569,8 @@ const Game = {
   },
 
   _onGoal(team) {
-    this.goalAnimTimer = 3.2;
-    this._goalSlowmoT = 1.5; // スローモーション時間
+    this.goalAnimTimer = 1.2;
+    this._goalSlowmoT = 1.2; // スローモーション時間
     this._goalScorerTeam = team;
     SFX.goal();
     const banner = document.getElementById('goal-banner');
@@ -583,7 +583,7 @@ const Game = {
       banner.textContent = label;
       banner.style.color = team === 'blue' ? '#29b6f6' : '#ff7043';
       banner.classList.add('show');
-      setTimeout(() => banner.classList.remove('show'), 2800);
+      setTimeout(() => banner.classList.remove('show'), 1300);
     }
     // ボール周囲に大規模パーティクル爆発
     this._spawnGoalExplosion(this.ball.x, this.ball.y, this.ball.z, team);
@@ -667,7 +667,7 @@ const Game = {
     resetTeam(orgList, 1);
     // パワーアップボックスもクリアして再スポーン待ち
     if (typeof PowerUps !== 'undefined') PowerUps.reset();
-    this.kickoffCountdown = 1.5; // ゴール後の小カウントダウン
+    this.kickoffCountdown = 0.8; // ゴール後の小カウントダウン
     // HUDも更新
     if (typeof PowerUps !== 'undefined') PowerUps._renderIndicator();
   },

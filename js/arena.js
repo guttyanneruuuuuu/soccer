@@ -2,7 +2,7 @@
 // 公式 Rocket League のスタンダードフィールドは 102.4m × 81.92m × 20.48m。
 // この実寸を踏襲しつつ、空中プレーが楽しめるよう天井を高めに 42m に設定。
 // Z軸: 長辺(ゴール方向)。X軸: 短辺。Y軸: 上方向。
-const ARENA_SCALE = 6.0;
+const ARENA_SCALE = 7.0;
 
 const Arena = {
   SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
