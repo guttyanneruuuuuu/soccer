@@ -3,8 +3,8 @@
 // アクセル: 自動 ON。ブレーキ/バック: ジャイロのピッチ (端末を後ろに傾ける) で発動。
 const CarPhys = {
   // サイズ (一回り大きく: 操作中車をでかく見せるため少し大きく)
-  RADIUS: 2.4,
-  HEIGHT: 1.7,
+  RADIUS: 4.8,
+  HEIGHT: 3.4,
 
   // 速度パラメタ (操作感アップ)
   MAX_SPEED: 50,          // m/s 通常最大 (180 km/h)
@@ -88,7 +88,7 @@ class Car {
     const colorHex = parseInt(this.color.replace('#',''), 16);
 
     // ロケットリーグ風: 平たくワイドに。スケールアップして「でかく見せる」
-    const S = 1.7;
+    const S = 3.4;
 
     // ボディ
     const body = new THREE.Mesh(
