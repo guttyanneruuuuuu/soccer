@@ -87,11 +87,11 @@ const Input = {
   _updateFromKeys() {
     // ジャイロが無効なときに限り、キーボードでステア + ブレーキできる
     if (this.gyroEnabled) return;
-    const k = this._keys;
-    const lr = (k['arrowright'] || k['d'] ? 1 : 0) + (k['arrowleft'] || k['a'] ? -1 : 0);
+    const keys = this._keys;
+    const lr = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
     this._keySteer = lr;
-    this.brake = !!(k['arrowdown'] || k['s']);
-    this.accel = !!(k['arrowup'] || k['w']);
+    this.brake = !!(keys['arrowdown'] || keys['s']);
+    this.accel = !!(keys['arrowup'] || keys['w']);
   },
 
   _bindTouch() {
