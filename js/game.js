@@ -213,9 +213,13 @@ const Game = {
     Input.update(dt);
 
     // キックオフ前カウントダウン中は車もボールも動かさない
-    const kickoffActive = this.kickoffCountdown > 0;
+    if (!Number.isFinite(this.kickoffCountdown) || this.kickoffCountdown < 0) {
+      this.kickoffCountdown = 0;
+    }
+    let kickoffActive = this.kickoffCountdown > 0;
     if (kickoffActive) {
       this.kickoffCountdown -= dt;
+      if (this.kickoffCountdown <= 0) this.kickoffCountdown = 0;
     }
 
     // ゴール演出中
@@ -223,6 +227,7 @@ const Game = {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
         this._kickoffReset();
+        kickoffActive = true;
       }
     }
 
