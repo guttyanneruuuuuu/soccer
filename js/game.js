@@ -227,8 +227,9 @@ const Game = {
     }
     if (this._goalResetPending) {
       this._goalResetSafetyTimer = Math.max(0, this._goalResetSafetyTimer - dt);
-      // 通常は goalAnimTimer の0到達で再開、念のためタイマー破綻時は safety で強制復帰
-      if (this.goalAnimTimer <= 0 || this._goalResetSafetyTimer <= 0) {
+      const animationComplete = this.goalAnimTimer <= 0;        // 通常復帰
+      const failsafeTriggered = this._goalResetSafetyTimer <= 0; // タイマー破綻時の保険
+      if (animationComplete || failsafeTriggered) {
         this._goalResetPending = false;
         this._goalResetSafetyTimer = 0;
         this.goalAnimTimer = 0;
