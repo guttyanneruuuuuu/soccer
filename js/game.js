@@ -224,7 +224,6 @@ const Game = {
     if (this.goalAnimTimer > 0) {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
-        this.goalAnimTimer = 0;
         this._kickoffReset();
       }
     }
