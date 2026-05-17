@@ -20,8 +20,8 @@ const CarPhys = {
 
   // 物理 (ジャンプ強化)
   GRAVITY: 42,
-  JUMP_VEL: 31,           // 高く飛べるよう強化
-  DOUBLE_JUMP_VEL: 27,    // 追加入力でもしっかり上がる
+  JUMP_VEL: 31,           // 地上からの初段でクロスバー付近まで届く高さに調整
+  DOUBLE_JUMP_VEL: 27,    // 2段目でも高度をしっかり維持できる値に調整
   AIR_PITCH_SPEED: 5.2,   // 空中ピッチ速度アップ
   AIR_ROLL_SPEED: 5.2,    // 空中ロール速度アップ
 
