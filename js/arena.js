@@ -25,12 +25,36 @@ const Arena = {
     // ===== フロア =====
     // 芝の縞模様を作る
     const floorTex = this._makeFieldTexture();
+    floorTex.anisotropy = 4;
     const floorGeo = new THREE.PlaneGeometry(this.W, this.L);
     const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     g.add(floor);
+
+    // フロアエッジに発光ライン (アリーナのフチ)
+    const edgeMat = new THREE.MeshBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.85 });
+    const edgePts = [
+      [-this.W/2, this.L/2], [this.W/2 - this.CORNER_INSET, this.L/2],
+      [this.W/2, this.L/2 - this.CORNER_INSET], [this.W/2, -this.L/2 + this.CORNER_INSET],
+      [this.W/2 - this.CORNER_INSET, -this.L/2], [-this.W/2 + this.CORNER_INSET, -this.L/2],
+      [-this.W/2, -this.L/2 + this.CORNER_INSET], [-this.W/2, this.L/2 - this.CORNER_INSET],
+      [-this.W/2 + this.CORNER_INSET, this.L/2],
+    ];
+    for (let i = 0; i < edgePts.length - 1; i++) {
+      const [x1, z1] = edgePts[i];
+      const [x2, z2] = edgePts[i + 1];
+      const len = Math.hypot(x2 - x1, z2 - z1);
+      const stripe = new THREE.Mesh(
+        new THREE.PlaneGeometry(len, 0.6),
+        edgeMat
+      );
+      stripe.rotation.x = -Math.PI / 2;
+      stripe.rotation.z = Math.atan2(z2 - z1, x2 - x1);
+      stripe.position.set((x1 + x2) / 2, 0.12, (z1 + z2) / 2);
+      g.add(stripe);
+    }
 
     // ===== フィールドライン =====
     const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 });
@@ -87,8 +111,11 @@ const Arena = {
     // ===== 壁: 4側壁 + 4コーナー（斜め） =====
     // 壁ライド感を出すため透けるグレー＆光のライン
     const wallMat = new THREE.MeshLambertMaterial({
-      color: 0x33485e, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      color: 0x1a2535, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
     });
+    // 壁上部のネオンストリップ素材
+    const neonBlueMat = new THREE.MeshBasicMaterial({ color: 0x29b6f6 });
+    const neonOrgMat  = new THREE.MeshBasicMaterial({ color: 0xff7043 });
     // 長辺(X = ±W/2) 壁: コーナーinsetを差し引いた長さ
     const longSideLen = this.L - this.CORNER_INSET * 2;
     for (const sign of [-1, 1]) {
@@ -104,6 +131,26 @@ const Arena = {
       back.position.set(0, this.H/2, sign * this.L/2);
       if (sign === 1) back.rotation.y = Math.PI;
       g.add(back);
+
+      // 短辺壁にチームカラーの大型ネオンストライプ (上下2本)
+      const teamMat = sign < 0 ? neonBlueMat : neonOrgMat;
+      const stripe1 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.6), teamMat);
+      stripe1.position.set(0, this.H - 1.5, sign * (this.L/2 - 0.05));
+      if (sign === 1) stripe1.rotation.y = Math.PI;
+      g.add(stripe1);
+      const stripe2 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.4), teamMat);
+      stripe2.position.set(0, 2.5, sign * (this.L/2 - 0.05));
+      if (sign === 1) stripe2.rotation.y = Math.PI;
+      g.add(stripe2);
+    }
+
+    // 長辺壁にも青/橙の交互ネオンライン (上部)
+    for (const sign of [-1, 1]) {
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(longSideLen, 0.5), 
+        new THREE.MeshBasicMaterial({ color: 0x9c27b0 }));
+      stripe.rotation.y = sign * Math.PI / 2;
+      stripe.position.set(sign * (this.W/2 - 0.05), this.H - 2.5, 0);
+      g.add(stripe);
     }
 
     // 4 コーナー (斜め壁) - ロケットリーグ風の45度カットイン

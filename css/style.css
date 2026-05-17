@@ -355,28 +355,41 @@ input { font: inherit; }
 
 .hud-speed {
   position: absolute;
-  bottom: 14px;
-  left: 14px;
-  padding: 6px 14px;
-  background: rgba(0,0,0,0.6);
-  border-radius: 10px;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 20px;
+  background: linear-gradient(180deg, rgba(0,30,60,0.85), rgba(0,10,30,0.85));
+  border-radius: 14px;
   text-align: center;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(79,195,247,0.4);
+  box-shadow: 0 0 12px rgba(33,150,243,0.3);
 }
 .speed-val {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 900;
   line-height: 1;
+  font-family: 'Courier New', monospace;
+  color: #4fc3f7;
+  text-shadow: 0 0 12px rgba(79,195,247,0.9);
+  min-width: 60px;
+  display: inline-block;
 }
-.speed-unit { font-size: 10px; color: #aaa; }
+.speed-unit { font-size: 10px; color: #88aacc; letter-spacing: 2px; }
 
-/* ブーストメーター: 円形ゲージ */
+/* ブーストメーター: 円形ゲージ (BOOSTボタン上に配置) */
 .boost-meter {
   position: absolute;
-  bottom: 14px;
-  right: 14px;
+  bottom: 138px;
+  left: 28px;
   width: 80px;
   height: 80px;
+  pointer-events: none;
+}
+@media (orientation: landscape) and (max-height: 420px) {
+  .boost-meter { bottom: 110px; left: 20px; width: 64px; height: 64px; }
+  .hud-speed { bottom: 14px; padding: 5px 14px; }
+  .speed-val { font-size: 22px; }
 }
 .boost-label {
   position: absolute;
@@ -404,14 +417,15 @@ input { font: inherit; }
 /* ジャイロインジケーター (左右の傾き可視化) */
 .gyro-indicator {
   position: absolute;
-  top: 12px;
-  left: 14px;
-  width: 90px;
-  height: 14px;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: 8px;
   background: rgba(0,0,0,0.55);
-  border-radius: 7px;
+  border-radius: 5px;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.18);
 }
 .gyro-indicator::before {
   content: '';
@@ -474,49 +488,189 @@ input { font: inherit; }
 }
 .brake-indicator.show { opacity: 1; }
 
-/* タッチコントロール: ジャンプ + ブースト */
+/* タッチコントロール: 大型・押しやすい */
 .touch-controls {
   position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 12px;
+  inset: 0;
+  pointer-events: none;
   z-index: 20;
-  pointer-events: none; /* ボタンのみpointer */
 }
 .touch-controls .ctrl-btn { pointer-events: auto; }
 
 .ctrl-btn {
-  padding: 14px 18px;
-  font-size: 14px;
+  position: absolute;
   font-weight: 900;
-  border: 2px solid rgba(255,255,255,0.4);
-  border-radius: 50px;
+  border: 3px solid rgba(255,255,255,0.55);
+  border-radius: 50%;
   background: rgba(0,0,0,0.55);
   color: #fff;
-  pointer-events: auto;
-  min-width: 100px;
-  transition: background 0.08s, transform 0.08s;
+  transition: background 0.08s, transform 0.06s, box-shadow 0.1s;
   user-select: none;
   -webkit-user-select: none;
   touch-action: manipulation;
   backdrop-filter: blur(6px);
   letter-spacing: 1px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 .ctrl-btn.pressed, .ctrl-btn:active {
-  background: rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.35);
   transform: scale(0.92);
 }
-.ctrl-jump  {
-  background: rgba(33,150,243,0.65);
-  box-shadow: 0 0 16px rgba(33,150,243,0.5);
-  font-size: 16px;
-  min-width: 120px;
+
+/* JUMPボタン: 右下 (親指が届きやすい位置) — 大型 */
+.ctrl-jump {
+  right: max(20px, env(safe-area-inset-right, 20px));
+  bottom: 22px;
+  width: 110px;
+  height: 110px;
+  font-size: 18px;
+  background: radial-gradient(circle at 35% 35%, rgba(79,195,247,0.95), rgba(33,150,243,0.85) 60%, rgba(13,71,161,0.9));
+  border-color: rgba(255,255,255,0.7);
+  box-shadow: 0 0 24px rgba(33,150,243,0.6), inset 0 -6px 12px rgba(0,0,0,0.3);
 }
+.ctrl-jump:active { box-shadow: 0 0 32px rgba(33,150,243,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+
+/* BOOSTボタン: 左下 — 同じく大型 */
 .ctrl-boost {
-  background: rgba(255,152,0,0.65);
-  box-shadow: 0 0 16px rgba(255,152,0,0.5);
+  left: max(20px, env(safe-area-inset-left, 20px));
+  bottom: 22px;
+  width: 110px;
+  height: 110px;
+  font-size: 16px;
+  background: radial-gradient(circle at 35% 35%, rgba(255,193,7,0.95), rgba(255,109,0,0.9) 60%, rgba(191,54,12,0.9));
+  border-color: rgba(255,255,255,0.7);
+  box-shadow: 0 0 24px rgba(255,109,0,0.7), inset 0 -6px 12px rgba(0,0,0,0.3);
+}
+.ctrl-boost:active { box-shadow: 0 0 36px rgba(255,109,0,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+
+/* 横画面が小さいスマホ用 */
+@media (orientation: landscape) and (max-height: 420px) {
+  .ctrl-jump, .ctrl-boost { width: 92px; height: 92px; font-size: 14px; bottom: 14px; }
+}
+
+/* ===== ミニマップ ===== */
+#minimap {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 160px;
+  height: 120px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 8px;
+  z-index: 15;
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+}
+@media (orientation: landscape) and (max-height: 420px) {
+  #minimap { width: 124px; height: 92px; top: 48px; }
+}
+
+/* ===== クイックチャット ===== */
+.quickchat-btn {
+  position: absolute;
+  bottom: 22px;
+  right: 145px;
+  width: 50px;
+  height: 50px;
+  font-size: 22px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  border: 2px solid rgba(255,255,255,0.3);
+  color: #fff;
+  z-index: 22;
+  backdrop-filter: blur(4px);
+}
+.quickchat-btn:active { background: rgba(255,255,255,0.2); }
+
+.quickchat-menu {
+  position: absolute;
+  bottom: 80px;
+  right: 60px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 25;
+  background: rgba(0,0,0,0.85);
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+.quickchat-menu.show { display: flex; }
+.quickchat-menu button {
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  min-width: 130px;
+}
+.quickchat-menu button:active { background: rgba(79,195,247,0.3); }
+
+#quickchat-bubbles {
+  position: absolute;
+  top: 200px;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+.chat-bubble {
+  position: absolute;
+  background: rgba(0,0,0,0.85);
+  border: 1px solid rgba(79,195,247,0.5);
+  border-radius: 14px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  animation: bubblePop 2.4s ease-out forwards;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+@keyframes bubblePop {
+  0% { transform: translate(-50%, 12px) scale(0.5); opacity: 0; }
+  10% { transform: translate(-50%, 0) scale(1.1); opacity: 1; }
+  20% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  85% { transform: translate(-50%, -8px) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -32px) scale(0.8); opacity: 0; }
+}
+
+/* パワーアップ表示 */
+.powerup-indicator {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 14;
+  pointer-events: none;
+}
+.powerup-pill {
+  padding: 5px 10px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0,0,0,0.6);
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 0 12px var(--glow, rgba(79,195,247,0.5));
+  animation: pillPulse 1.4s ease-in-out infinite;
+}
+@keyframes pillPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
 /* 設定 */

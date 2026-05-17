@@ -55,6 +55,20 @@ class Ball {
     });
     this.glow = new THREE.Mesh(glowGeo, glowMat);
     scene.add(this.glow);
+
+    // ===== トレイル (高速時にカラフルな軌跡) =====
+    this._trailPool = [];
+    this._trailColors = [0x29b6f6, 0x9c27b0, 0xff7043, 0xffeb3b];
+    const TRAIL_SEGMENTS = 14;
+    for (let i = 0; i < TRAIL_SEGMENTS; i++) {
+      const tg = new THREE.SphereGeometry(BallPhys.RADIUS * 0.85, 10, 8);
+      const tm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+      const tmesh = new THREE.Mesh(tg, tm);
+      scene.add(tmesh);
+      this._trailPool.push(tmesh);
+    }
+    this._trailIdx = 0;
+    this._trailTimer = 0;
   }
 
   _makeSoccerTexture() {
@@ -107,6 +121,10 @@ class Ball {
     this.lastHitter = null;
     this._hitFlashTimer = 0;
     if (this.glow) this.glow.material.opacity = 0;
+    // トレイルもクリア
+    if (this._trailPool) {
+      for (const t of this._trailPool) { t.material.opacity = 0; t._life = 0; }
+    }
   }
 
   update(dt) {
@@ -204,6 +222,35 @@ class Ball {
     } else if (this.glow.material.opacity > 0) {
       this.glow.material.opacity = 0;
     }
+
+    // ===== トレイル: 高速時に色付きの粒子を残す =====
+    const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy + this.vz*this.vz);
+    this._trailTimer -= dt;
+    const trailActive = speed > 22;
+    if (trailActive && this._trailTimer <= 0) {
+      this._trailTimer = 0.035;
+      const t = this._trailPool[this._trailIdx];
+      const color = this._trailColors[this._trailIdx % this._trailColors.length];
+      t.material.color.setHex(color);
+      t.material.opacity = Utils.clamp(speed / 60, 0.4, 0.95);
+      t.position.set(this.x, this.y, this.z);
+      const sc = 0.7 + Utils.clamp(speed / 80, 0, 0.5);
+      t.scale.set(sc, sc, sc);
+      t._life = 0.45;
+      this._trailIdx = (this._trailIdx + 1) % this._trailPool.length;
+    }
+    // フェードアウト
+    for (const t of this._trailPool) {
+      if (t._life === undefined) continue;
+      if (t._life > 0) {
+        t._life -= dt;
+        const a = Math.max(0, t._life / 0.45);
+        t.material.opacity = t.material.opacity * 0.85 * (a + 0.001);
+        const cs = t.scale.x * 0.96;
+        t.scale.set(cs, cs, cs);
+        if (t._life <= 0) { t.material.opacity = 0; }
+      }
+    }
   }
 
   // 車との衝突: 高反発でボールを大きく飛ばす
@@ -240,9 +287,11 @@ class Ball {
 
     // 車の運動量を直接ボールに乗せる（「勢いのある車に当たるとむっちゃ飛ぶ」）
     const carSpeedMag = Math.sqrt(car.vx*car.vx + car.vy*car.vy + car.vz*car.vz);
-    const baseKick = BallPhys.HIT_MIN_KICK + carSpeedMag * BallPhys.HIT_VEL_TRANSFER;
+    // GIANTパワー時はキック力1.7倍
+    const giantBoost = (car.activePower === 'giant') ? 1.7 : 1.0;
+    const baseKick = (BallPhys.HIT_MIN_KICK + carSpeedMag * BallPhys.HIT_VEL_TRANSFER) * giantBoost;
     this.vx += nx * baseKick;
-    this.vy += ny * baseKick + BallPhys.HIT_LIFT;
+    this.vy += ny * baseKick + BallPhys.HIT_LIFT * giantBoost;
     this.vz += nz * baseKick;
 
     // 速度上限

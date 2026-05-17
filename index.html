@@ -7,7 +7,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Gyro Soccer Arena - スマホでロケットリーグ風サッカー</title>
+  <title>Gyro Soccer Arena ⚽ スマホでカーサッカー</title>
   <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -65,8 +65,11 @@
       </div>
       <p class="hint">
         📱 <strong>横向き</strong>+<strong>ジャイロ</strong>で操作！<br>
-        左右の傾き=ハンドル / 後ろに傾けるとブレーキ / 唯一のボタン=ジャンプ<br>
-        友達と最大 4v4（8人）でオンライン対戦！
+        🔄 左右に傾ける=ステア / 🪑 手前に倒す=ブレーキ・バック<br>
+        🔥 BOOST(左下) で加速 / ⬆ JUMP(右下) でジャンプ・ダブルジャンプフリップ<br>
+        🛡 フィールドに浮かぶアイテムでパワーアップ ( SHIELD / MAGNET / GIANT / TURBO / SPRING )<br>
+        💥 ブースト中の体当たりで敵車をデモリッション！<br>
+        最大 4v4（8人）のオンライン対戦＆Botと練習可能！
       </p>
       <p class="orientation-warn" id="orientation-warn">
         ⚠️ スマホを <strong>横向き</strong>にしてプレイしてね！
@@ -150,11 +153,29 @@
       <div id="brake-indicator" class="brake-indicator">🅑 BRAKE</div>
     </div>
 
-    <!-- タッチ操作: ジャンプボタンのみ (右下) + 隠しブーストボタン(オプション) -->
+    <!-- タッチ操作: BOOST(左下) + JUMP(右下) -->
     <div class="touch-controls">
-      <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆ JUMP</button>
-      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥 BOOST</button>
+      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥<br>BOOST</button>
+      <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆<br>JUMP</button>
     </div>
+
+    <!-- ミニマップ (上部右) -->
+    <canvas id="minimap" width="160" height="120"></canvas>
+
+    <!-- クイックチャット -->
+    <button class="quickchat-btn" id="quickchat-btn">💬</button>
+    <div class="quickchat-menu" id="quickchat-menu">
+      <button data-msg="nice">👍 ナイス！</button>
+      <button data-msg="sorry">🙏 ごめん！</button>
+      <button data-msg="ok">🤝 おk！</button>
+      <button data-msg="defend">🛡 戻る！</button>
+      <button data-msg="taken">⚡ おれ行く</button>
+      <button data-msg="wow">😱 すげぇ！</button>
+    </div>
+    <div id="quickchat-bubbles"></div>
+
+    <!-- パワーアップ表示 -->
+    <div id="powerup-indicator" class="powerup-indicator"></div>
 
     <!-- 設定 -->
     <div class="settings-stack">
@@ -221,6 +242,9 @@
   <script src="js/car.js"></script>
   <script src="js/ball.js"></script>
   <script src="js/network.js"></script>
+  <script src="js/powerups.js"></script>
+  <script src="js/minimap.js"></script>
+  <script src="js/quickchat.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>
