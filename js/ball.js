@@ -6,7 +6,7 @@
 //   - 速度上限を超えるベクトルが NaN になりやすかった箇所を堅牢化
 const BallPhys = {
   RADIUS: 10.8,
-  GRAVITY: 22,            // PDCA6.5: 滞空時間が長すぎたため重力UP (15 → 22) — リモート優先
+  GRAVITY: 26,            // 滞空時間を短縮して「軽すぎる」感を抑制
   AIR_FRICTION: 0.05,     // 風船らしく空気抵抗ややあり
   GROUND_FRICTION: 0.45,
   WALL_BOUNCE: 0.92,
@@ -16,7 +16,7 @@ const BallPhys = {
   HIT_RESTITUTION: 1.42,
   HIT_VEL_TRANSFER: 0.80, // PDCA7: 0.78 → 0.80 (車の勢いが乗りやすく)
   HIT_MIN_KICK: 17,       // PDCA7: 16 → 17 (打感UP)
-  HIT_LIFT: 3.8,          // PDCA6.5: ヒット時上方向成分を抑制 (6.0 → 3.8) — リモート優先
+  HIT_LIFT: 2.6,          // ヒット時の持ち上がりをさらに抑制
 };
 
 class Ball {
