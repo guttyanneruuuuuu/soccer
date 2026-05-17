@@ -1,24 +1,34 @@
-// ============= 入力管理 (ジャイロ + ACCEL/JUMP タッチ) =============
-// racegame のジャイロ実装をベースに、サッカーゲーム用に再構成:
-// - 左右ステアリング: ジャイロの傾き (gamma / beta) を自動キャリブレーション付きで使用
-// - アクセル: 画面右下 ACCEL ボタン押下中のみ ON
-// - ブレーキ/バック: 端末を奥(手前)に傾けるとピッチで発動 - ジャイロのみで操作!
-// - ブースト: 端末を強めに前傾 (オプション) または Shift
-// - ジャンプ: 画面のジャンプボタン (押した瞬間のみ true)
+// ============= 入力管理 (ジャイロ + タッチボタン) =============
+// スマホ横画面でのジャイロ操作を最大限直感的にするための入力レイヤ。
+//
+// ボタン配置 (タッチ):
+//   - 左下:   JUMP        (ジャンプ。短押しで通常ジャンプ、空中で再度押すとフリップ)
+//   - 右下:   ACCEL       (前進アクセル)
+//   - 左中下: AIR ROLL    (空中限定。押している間はステア入力をロールに切り替え)
+//   - 右中下: BOOST       (ブースト。長押し中、燃料が残っている間)
+//   - 右上:   CAMERA      (カメラ視点切替: 通常 / ボール視点)
+//
+// ジャイロ:
+//   - 左右の傾き (gamma/beta) → ステアリング (画面回転を考慮)
+//   - 端末を奥に倒す(=底面が前) → アクセル (ACCELボタンの代替・オプション)
+//   - 端末を手前に倒す(=底面が後ろ) → ブレーキ/バック (ヒステリシス付き)
 const Input = {
-  // 出力
-  steer: 0,       // -1 .. 1 (ジャイロ左右)
-  pitch: 0,       // -1 .. 1 (ジャイロ前後傾)
-  accel: false,   // ACCELボタン押下時 ON
-  brake: false,   // ピッチ後傾 (端末を起こす)
-  boost: false,   // ピッチ前傾 (端末を前に倒す) で発動
-  jump: false,    // 1フレームだけ立つトリガー
+  // ====== 出力 (ゲームから読まれる) ======
+  steer: 0,        // -1 .. 1 (左右ステア)
+  pitch: 0,        // -1 .. 1 (前後傾)
+  accel: false,    // ACCELボタン押下 or 強い前傾(オプション)
+  brake: false,    // 手前に傾けるとON
+  boost: false,    // BOOSTボタン押下 or オプションで強前傾
+  jump: false,     // 押した瞬間1フレームだけ立つ (consumeJumpで消費)
   jumpHeld: false,
+  airRoll: false,  // AIR ROLLボタン押下中 ⇒ ステア入力をロールに使う
+  cameraToggleRequest: false, // カメラ切替要求 (consume制)
 
+  // ====== ジャイロ状態 ======
   gyroEnabled: false,
   gyroCalibrated: false,
-  gyroBase: 0,      // ステアリング(横軸)基準
-  pitchBase: 0,     // ピッチ(縦軸)基準
+  gyroBase: 0,
+  pitchBase: 0,
   gyroRaw: 0,
   pitchRaw: 0,
   gyroLastSampleTime: 0,
@@ -29,20 +39,23 @@ const Input = {
   _gyroOrientHandler: null,
   _fallbackLandscapeSign: 1,
   _safeStorage: null,
+  _lastOrientUpdateTime: 0, // ジャイロパケットが届いてない時の検出用
 
-  // 設定値 (ジャイロ安定化) - 操作性向上のため再チューニング
-  // sensitivity: 値が小さいほど傾けに敏感。18°でフル切り (UI スライダーのデフォルト)
-  sensitivity: 18,
-  deadzone: 0.8,           // 微小入力でも反応するように小さく (1.2 → 0.8)
+  // ====== 設定 (LocalStorage に保存) ======
+  // sensitivity: ステアがフルになる傾き(度)。小さいほど敏感。
+  // 16°デフォルトは「軽い手首ひねりで切れる」感覚。
+  sensitivity: 16,
+  deadzone: 0.7,            // 微小入力の無視幅(度)。0.8 → 0.7 でさらに繊細に
   invert: false,
-  // ピッチ系: ブレーキ誤動作を防ぐためデッドゾーンとしきい値を大きめに
+  // ピッチ
   pitchSensitivity: 18,
-  pitchDeadzone: 4.0,       // 持ち上げ時のブレーキ誤動作軽減 (2.8 → 4.0)
-  brakeThreshold: 0.45,     // ブレーキ発動しきい値を上げる (0.3 → 0.45)
-  boostThreshold: 0.42,
-  autoBoost: false,        // 前傾でブーストするか (デフォルトOFF)
-  // 中央付近のレスポンスを柔らかく、端付近を強くする (非線形カーブ)
-  steerCurveExp: 1.45,     // 1.0 = 直線、>1 = 中央緩やか・端急角度
+  pitchDeadzone: 4.0,
+  brakeThreshold: 0.42,
+  boostThreshold: 0.45,
+  autoBoost: false,         // ON: 前傾でブースト発動
+  autoAccel: false,         // ON: 前傾(=底を前)で自動アクセル (ACCELボタン不要)
+  // 中央緩やかカーブ
+  steerCurveExp: 1.4,
 
   _keys: {},
 
@@ -50,10 +63,9 @@ const Input = {
     this._safeStorage = this._getStorage();
     const saved = parseFloat(this._storageGet('soccer-sensitivity'));
     if (!isNaN(saved) && saved > 5 && saved < 60) this.sensitivity = saved;
-    const invSaved = this._storageGet('soccer-invert');
-    if (invSaved === '1') this.invert = true;
-    const ab = this._storageGet('soccer-autoboost');
-    if (ab === '1') this.autoBoost = true;
+    if (this._storageGet('soccer-invert') === '1') this.invert = true;
+    if (this._storageGet('soccer-autoboost') === '1') this.autoBoost = true;
+    if (this._storageGet('soccer-autoaccel') === '1') this.autoAccel = true;
     const curve = parseFloat(this._storageGet('soccer-curve'));
     if (!isNaN(curve) && curve >= 1.0 && curve <= 2.0) this.steerCurveExp = curve;
 
@@ -79,24 +91,32 @@ const Input = {
   _bindKeys() {
     // PC 用キーボード (デバッグ・PC ユーザー向け)
     window.addEventListener('keydown', (e) => {
+      // テキスト入力中は無視
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.repeat) return;
       const k = e.key.toLowerCase();
       this._keys[k] = true;
       this._updateFromKeys();
       if (k === ' ' || k === 'j') { this.jump = true; this.jumpHeld = true; }
       if (k === 'shift') this.boost = true;
+      if (k === 'q' || k === 'l') this.airRoll = true;
+      if (k === 'v') this.cameraToggleRequest = true;
     });
     window.addEventListener('keyup', (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       const k = e.key.toLowerCase();
       this._keys[k] = false;
       this._updateFromKeys();
       if (k === ' ' || k === 'j') this.jumpHeld = false;
       if (k === 'shift') this.boost = false;
+      if (k === 'q' || k === 'l') this.airRoll = false;
     });
   },
 
   _updateFromKeys() {
-    // ジャイロが無効なときに限り、キーボードでステア + ブレーキ
+    // ジャイロ無効時はキーボードでステア + ブレーキ
     if (this.gyroEnabled) return;
     const keys = this._keys;
     const lr = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
@@ -104,15 +124,62 @@ const Input = {
     this.brake = !!(keys['arrowdown'] || keys['s']);
     this.accel = !!(keys['arrowup'] || keys['w']);
   },
-  // ジャイロ ON でもキーボード入力をマージ (PC でテストしやすく)
+  // ジャイロ ON でもキーボード入力をマージ (PC テスト用)
   _keyboardOverride() {
     const keys = this._keys;
     if (keys['arrowup'] || keys['w']) this.accel = true;
     if (keys['arrowdown'] || keys['s']) this.brake = true;
   },
 
+  // ==== タッチボタンユーティリティ: 「押している間 ON」ボタン ====
+  _bindHoldButton(id, onPress, onRelease) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let pointerId = null;
+    const on = (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      if (e && e.pointerId != null) pointerId = e.pointerId;
+      el.classList.add('pressed');
+      onPress && onPress();
+    };
+    const off = (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      el.classList.remove('pressed');
+      onRelease && onRelease();
+      pointerId = null;
+    };
+    // pointer + touch + mouse 全部に対応 (チャタリング防止のため複数経路で off を保障)
+    el.addEventListener('pointerdown', on);
+    el.addEventListener('pointerup', off);
+    el.addEventListener('pointercancel', off);
+    el.addEventListener('pointerleave', (e) => { if (pointerId !== null) off(e); });
+    el.addEventListener('touchstart', on, { passive: false });
+    el.addEventListener('touchend', off, { passive: false });
+    el.addEventListener('touchcancel', off, { passive: false });
+    el.addEventListener('mousedown', on);
+    el.addEventListener('mouseup', off);
+    el.addEventListener('mouseleave', off);
+    // 文脈メニュー抑止
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  },
+
+  // 「押した瞬間トリガー」ボタン
+  _bindTapButton(id, onTap) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const handle = (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      el.classList.add('pressed');
+      onTap && onTap();
+      setTimeout(() => el.classList.remove('pressed'), 100);
+    };
+    el.addEventListener('pointerdown', handle);
+    el.addEventListener('touchstart', handle, { passive: false });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  },
+
   _bindTouch() {
-    // ジャンプボタンのみ
+    // JUMP ボタン (タップ = 1度トリガー、ホールド検知も)
     const jumpBtn = document.getElementById('ctrl-jump');
     if (jumpBtn) {
       const on = (e) => {
@@ -126,53 +193,62 @@ const Input = {
         this.jumpHeld = false;
         jumpBtn.classList.remove('pressed');
       };
+      jumpBtn.addEventListener('pointerdown', on);
+      jumpBtn.addEventListener('pointerup', off);
+      jumpBtn.addEventListener('pointercancel', off);
+      jumpBtn.addEventListener('pointerleave', off);
       jumpBtn.addEventListener('touchstart', on, { passive: false });
       jumpBtn.addEventListener('touchend', off, { passive: false });
       jumpBtn.addEventListener('touchcancel', off, { passive: false });
       jumpBtn.addEventListener('mousedown', on);
       jumpBtn.addEventListener('mouseup', off);
       jumpBtn.addEventListener('mouseleave', off);
+      jumpBtn.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
-    // アクセルボタン
-    const accelBtn = document.getElementById('ctrl-accel');
-    if (accelBtn) {
-      const on = (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        this.accel = true;
-        accelBtn.classList.add('pressed');
-      };
-      const off = (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        this.accel = false;
-        accelBtn.classList.remove('pressed');
-      };
-      accelBtn.addEventListener('touchstart', on, { passive: false });
-      accelBtn.addEventListener('touchend', off, { passive: false });
-      accelBtn.addEventListener('touchcancel', off, { passive: false });
-      accelBtn.addEventListener('mousedown', on);
-      accelBtn.addEventListener('mouseup', off);
-      accelBtn.addEventListener('mouseleave', off);
-    }
+    // ACCELボタン (ホールド)
+    this._bindHoldButton('ctrl-accel', () => { this.accel = true; }, () => { this.accel = false; });
+    // BOOSTボタン (ホールド)
+    this._bindHoldButton('ctrl-boost', () => { this.boost = true; }, () => { this.boost = false; });
+    // AIR ROLLボタン (ホールド)
+    this._bindHoldButton('ctrl-airroll', () => { this.airRoll = true; }, () => { this.airRoll = false; });
+    // CAMERA切替 (タップ)
+    this._bindTapButton('btn-camera', () => { this.cameraToggleRequest = true; });
   },
 
+  // === メインループから毎フレーム呼ばれる ===
   update(dt) {
-    // ジャイロが無効なら キーボード steer をスムージング
-    if (!this.gyroEnabled) {
+    // ジャイロパケットが暫く来てなかったら静止扱い (フリーズ防止)
+    if (this.gyroEnabled) {
+      const now = performance.now();
+      if (this._lastOrientUpdateTime && now - this._lastOrientUpdateTime > 500) {
+        // 0.5秒以上来てない → ステア徐々に0へ
+        this._smoothed = Utils.lerp(this._smoothed, 0, dt * 4);
+        this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, 0, dt * 4);
+        this.steer = this._smoothed;
+        this.pitch = this._pitchSmoothed;
+      }
+      // PC キーボードでも accel/brake をオーバーライド (デバッグ用)
+      this._keyboardOverride();
+    } else {
+      // ジャイロが無効ならキーボード steer をスムージング
       const target = this._keySteer || 0;
       const response = target === 0 ? 22 : 18;
       const alpha = Utils.clamp(dt * response, 0.28, 0.85);
       this.steer = Utils.lerp(this.steer, target, alpha);
       if (Math.abs(this.steer) < 0.001 && target === 0) this.steer = 0;
-    } else {
-      // ジャイロ ON でも PC キーボードで accel/brake をオーバーライド (デバッグ用)
-      this._keyboardOverride();
     }
   },
 
   consumeJump() {
     const v = this.jump;
     this.jump = false;
+    return v;
+  },
+
+  consumeCameraToggle() {
+    const v = this.cameraToggleRequest;
+    this.cameraToggleRequest = false;
     return v;
   },
 
@@ -196,6 +272,7 @@ const Input = {
   },
 
   _onOrient(e) {
+    this._lastOrientUpdateTime = performance.now();
     let g = e.gamma || 0;
     let b = e.beta || 0;
     let angle = 0;
@@ -209,7 +286,6 @@ const Input = {
     const fallbackLandscape = normAngle !== 90 && normAngle !== 270 &&
       ((orientationType && orientationType.startsWith('landscape')) || window.innerWidth > window.innerHeight);
 
-    // ステア用/ピッチ用を画面回転に追従して算出（直感操作重視）
     let mappedAngle = normAngle;
     if (fallbackLandscape) {
       if (orientationType.includes('secondary')) this._fallbackLandscapeSign = -1;
@@ -229,7 +305,6 @@ const Input = {
     if (!this.gyroCalibrated) {
       this.gyroSamples.push(steerVal);
       this.pitchSamples.push(pitchVal);
-      // 16サンプルで初期姿勢を平均化し、端末ごとのセンサーノイズ差を吸収
       if (this.gyroSamples.length >= 16) {
         let avg = 0, pavg = 0;
         for (let i = 0; i < this.gyroSamples.length; i++) {
@@ -249,25 +324,21 @@ const Input = {
 
     // ===== ステアリング =====
     let diff = steerVal - this.gyroBase;
-    // 微弱ドリフト追従 (端末が物理的にずれたときのキャリブ補正)
-    // ステアは即応性が大事なので追従はゆっくり、デッドゾーン内のみ
-    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 1.8) {
-      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.006);
+    // 微弱ドリフト追従 (端末がだんだんずれる対策)
+    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 1.6) {
+      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.005);
       diff = steerVal - this.gyroBase;
     }
     if (Math.abs(diff) < this.deadzone) diff = 0;
     else diff -= Math.sign(diff) * this.deadzone;
-    // sensitivity(度)で正規化。中央緩やか・端急角度の曲線で「微調整しやすい」
     const norm = Utils.clamp(diff / this.sensitivity, -1.2, 1.2);
-    // exp > 1: 中央近くを優しく、端で強く反応 → 直進維持しやすい
     const absNorm = Math.min(1, Math.abs(norm));
     const curved = Math.sign(norm) * Math.pow(absNorm, this.steerCurveExp);
     let target = -Utils.clamp(curved, -1, 1);
     if (this.invert) target = -target;
 
-    // ===== ピッチ (ブレーキ/ブースト判定) =====
+    // ===== ピッチ =====
     let pdiff = pitchVal - this.pitchBase;
-    // ピッチ基準はゆっくり追従。ブレーキの誤発動を防ぐためデッドゾーンを広めに
     if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.2) {
       this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.003);
       pdiff = pitchVal - this.pitchBase;
@@ -275,33 +346,38 @@ const Input = {
     if (Math.abs(pdiff) < this.pitchDeadzone) pdiff = 0;
     else pdiff -= Math.sign(pdiff) * this.pitchDeadzone;
     const pnorm = Utils.clamp(pdiff / this.pitchSensitivity, -1.2, 1.2);
-    // ピッチも非線形に。空中時のエア操作にも使用される
     const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.2);
     const ptarget = Utils.clamp(pcurved, -1, 1);
 
-    // 適応的ローパス: 急変時(差が大)は高速追従、微小ノイズはなだらかに
+    // 適応的ローパス
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
     const delta = Math.abs(target - this._smoothed);
-    // 入力差が大きい(=ステア切ろうとしている)ほど早く追従
-    const alpha = Utils.clamp(dt * (28 + delta * 32), 0.32, 0.92);
+    const alpha = Utils.clamp(dt * (30 + delta * 36), 0.34, 0.94);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
     this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha * 0.85);
 
     this.steer = this._smoothed;
     this.pitch = this._pitchSmoothed;
 
-    // ピッチ後傾 (端末を起こす方向: pitch > 0) でブレーキ
-    // ヒステリシスでチャタリング防止
+    // ピッチ後傾 (端末を起こす = pitch > 0) でブレーキ (ヒステリシス付き)
     if (this.brake) {
-      this.brake = (this.pitch > this.brakeThreshold * 0.65);
+      this.brake = (this.pitch > this.brakeThreshold * 0.62);
     } else {
       this.brake = (this.pitch > this.brakeThreshold);
     }
-    // ピッチ前傾 でオプションブースト (デフォルト OFF。ジャンプボタンで集中。ブーストボタンが優先)
-    if (this.autoBoost && !this._keys['shift']) {
-      this.boost = (this.pitch < -this.boostThreshold);
+    // 前傾でブースト (オプション) - BOOSTボタンが ON ならそれを優先
+    if (this.autoBoost) {
+      // ピッチ前傾が深い → ブースト ON 補助
+      // ※ ボタンが押されている時はそのまま、ボタン無しなら pitch で判断
+      if (this.pitch < -this.boostThreshold) {
+        this.boost = true;
+      }
+    }
+    // 前傾でアクセル (オプション、ACCELボタン不要)
+    if (this.autoAccel && this.pitch < -0.2) {
+      this.accel = true;
     }
   },
 
@@ -330,6 +406,11 @@ const Input = {
   setAutoBoost(v) {
     this.autoBoost = !!v;
     this._storageSet('soccer-autoboost', this.autoBoost ? '1' : '0');
+  },
+
+  setAutoAccel(v) {
+    this.autoAccel = !!v;
+    this._storageSet('soccer-autoaccel', this.autoAccel ? '1' : '0');
   },
 
   _getStorage() {

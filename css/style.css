@@ -355,41 +355,47 @@ input { font: inherit; }
 
 .hud-speed {
   position: absolute;
-  bottom: 22px;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 8px 20px;
+  padding: 5px 18px;
   background: linear-gradient(180deg, rgba(0,30,60,0.85), rgba(0,10,30,0.85));
   border-radius: 14px;
   text-align: center;
   border: 1px solid rgba(79,195,247,0.4);
   box-shadow: 0 0 12px rgba(33,150,243,0.3);
+  pointer-events: none;
 }
 .speed-val {
-  font-size: 30px;
+  font-size: 24px;
   font-weight: 900;
   line-height: 1;
   font-family: 'Courier New', monospace;
   color: #4fc3f7;
   text-shadow: 0 0 12px rgba(79,195,247,0.9);
-  min-width: 60px;
+  min-width: 56px;
   display: inline-block;
+  transition: color 0.2s;
 }
-.speed-unit { font-size: 10px; color: #88aacc; letter-spacing: 2px; }
+.speed-val.supersonic { color: #ffeb3b; text-shadow: 0 0 16px rgba(255,235,59,1), 0 0 32px rgba(255,87,34,0.8); }
+.speed-unit { font-size: 9px; color: #88aacc; letter-spacing: 2px; }
 
-/* ブーストメーター: 円形ゲージ (BOOSTボタン上に配置) */
+/* ブーストメーター: 円形ゲージ (BOOSTボタン横の少し上) */
 .boost-meter {
   position: absolute;
-  bottom: 138px;
-  left: 28px;
-  width: 80px;
-  height: 80px;
+  bottom: 160px;
+  right: 220px;
+  width: 78px;
+  height: 78px;
   pointer-events: none;
 }
 @media (orientation: landscape) and (max-height: 420px) {
-  .boost-meter { bottom: 110px; left: 20px; width: 64px; height: 64px; }
+  .boost-meter { bottom: 124px; right: 170px; width: 60px; height: 60px; }
   .hud-speed { bottom: 14px; padding: 5px 14px; }
   .speed-val { font-size: 22px; }
+}
+@media (max-width: 720px) {
+  .boost-meter { right: 200px; }
 }
 .boost-label {
   position: absolute;
@@ -544,31 +550,168 @@ input { font: inherit; }
 .ctrl-jump {
   left: max(20px, env(safe-area-inset-left, 20px));
   bottom: 22px;
-  width: 110px;
-  height: 110px;
-  font-size: 18px;
+  width: 108px;
+  height: 108px;
+  font-size: 17px;
   background: radial-gradient(circle at 35% 35%, rgba(79,195,247,0.95), rgba(33,150,243,0.85) 60%, rgba(13,71,161,0.9));
   border-color: rgba(255,255,255,0.7);
   box-shadow: 0 0 24px rgba(33,150,243,0.6), inset 0 -6px 12px rgba(0,0,0,0.3);
 }
-.ctrl-jump:active { box-shadow: 0 0 32px rgba(33,150,243,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+.ctrl-jump:active, .ctrl-jump.pressed { box-shadow: 0 0 32px rgba(33,150,243,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
 
 /* ACCELボタン: 右下 — 同じく大型 */
 .ctrl-accel {
   right: max(20px, env(safe-area-inset-right, 20px));
   bottom: 22px;
-  width: 110px;
-  height: 110px;
-  font-size: 16px;
+  width: 108px;
+  height: 108px;
+  font-size: 15px;
   background: radial-gradient(circle at 35% 35%, rgba(255,193,7,0.95), rgba(255,109,0,0.9) 60%, rgba(191,54,12,0.9));
   border-color: rgba(255,255,255,0.7);
   box-shadow: 0 0 24px rgba(255,109,0,0.7), inset 0 -6px 12px rgba(0,0,0,0.3);
 }
-.ctrl-accel:active { box-shadow: 0 0 36px rgba(255,109,0,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+.ctrl-accel:active, .ctrl-accel.pressed { box-shadow: 0 0 36px rgba(255,109,0,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+
+/* BOOST ボタン: ACCEL の左斜め上 */
+.ctrl-boost {
+  right: calc(max(20px, env(safe-area-inset-right, 20px)) + 116px);
+  bottom: 70px;
+  width: 80px;
+  height: 80px;
+  font-size: 13px;
+  background: radial-gradient(circle at 35% 35%, rgba(255,87,34,0.95), rgba(244,67,54,0.9) 60%, rgba(136,14,79,0.9));
+  border-color: rgba(255,200,100,0.8);
+  box-shadow: 0 0 22px rgba(255,87,34,0.7), inset 0 -4px 10px rgba(0,0,0,0.3);
+}
+.ctrl-boost:active, .ctrl-boost.pressed {
+  box-shadow: 0 0 36px rgba(255,87,34,1), inset 0 -2px 6px rgba(0,0,0,0.3);
+  background: radial-gradient(circle at 35% 35%, rgba(255,255,200,0.95), rgba(255,87,34,1) 60%, rgba(244,67,54,1));
+}
+
+/* AIR ROLL ボタン: JUMP の右斜め上 (空中で右親指で押す想定) */
+.ctrl-airroll {
+  left: calc(max(20px, env(safe-area-inset-left, 20px)) + 116px);
+  bottom: 70px;
+  width: 80px;
+  height: 80px;
+  font-size: 11px;
+  background: radial-gradient(circle at 35% 35%, rgba(156,39,176,0.95), rgba(103,58,183,0.9) 60%, rgba(63,81,181,0.9));
+  border-color: rgba(255,255,255,0.55);
+  box-shadow: 0 0 20px rgba(156,39,176,0.6), inset 0 -4px 10px rgba(0,0,0,0.3);
+  opacity: 0.85;
+  line-height: 1.1;
+}
+.ctrl-airroll:active, .ctrl-airroll.pressed {
+  box-shadow: 0 0 32px rgba(156,39,176,1), inset 0 -2px 6px rgba(0,0,0,0.3);
+  opacity: 1;
+}
 
 /* 横画面が小さいスマホ用 */
 @media (orientation: landscape) and (max-height: 420px) {
-  .ctrl-jump, .ctrl-accel { width: 92px; height: 92px; font-size: 14px; bottom: 14px; }
+  .ctrl-jump, .ctrl-accel { width: 90px; height: 90px; font-size: 13px; bottom: 14px; }
+  .ctrl-boost { width: 64px; height: 64px; font-size: 11px; bottom: 50px; right: calc(max(20px, env(safe-area-inset-right, 20px)) + 96px); }
+  .ctrl-airroll { width: 64px; height: 64px; font-size: 10px; bottom: 50px; left: calc(max(20px, env(safe-area-inset-left, 20px)) + 96px); }
+}
+
+/* ボール方向インジケーター (画面端) */
+.ball-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s;
+  z-index: 16;
+}
+.ball-indicator.show { opacity: 1; }
+.ball-indicator-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 900;
+  color: #fff;
+  background: rgba(0,0,0,0.65);
+  border: 2px solid #ffeb3b;
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(255,235,59,0.7);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+.ball-dist {
+  font-size: 9px;
+  color: #ffeb3b;
+  letter-spacing: 1px;
+  font-family: 'Courier New', monospace;
+}
+
+/* コンボメーター */
+.combo-meter {
+  position: absolute;
+  top: 76px;
+  left: 12px;
+  padding: 5px 10px 5px 12px;
+  background: linear-gradient(90deg, rgba(255,87,34,0.85), rgba(255,193,7,0.85));
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 1px;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 16;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.combo-meter.show { opacity: 1; transform: scale(1); }
+.combo-count {
+  font-size: 16px;
+  margin-left: 4px;
+  color: #fff;
+}
+.combo-meter.big {
+  animation: comboBig 0.35s ease-out;
+}
+@keyframes comboBig {
+  0% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+/* スーパーソニック */
+.supersonic-indicator {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.6);
+  padding: 5px 16px;
+  background: linear-gradient(90deg, #ff5722, #ffeb3b, #ff5722);
+  background-size: 200% 100%;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 900;
+  color: #1a0000;
+  letter-spacing: 2px;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 14;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.6);
+  pointer-events: none;
+  box-shadow: 0 0 24px rgba(255,235,59,0.85);
+  animation: ssShine 1.4s linear infinite;
+}
+.supersonic-indicator.show {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+@keyframes ssShine {
+  0% { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
 }
 
 /* ===== ミニマップ ===== */
@@ -592,11 +735,11 @@ input { font: inherit; }
 /* ===== クイックチャット ===== */
 .quickchat-btn {
   position: absolute;
-  bottom: 22px;
-  right: 145px;
-  width: 50px;
-  height: 50px;
-  font-size: 22px;
+  bottom: 160px;
+  right: 22px;
+  width: 46px;
+  height: 46px;
+  font-size: 20px;
   border-radius: 50%;
   background: rgba(0,0,0,0.6);
   border: 2px solid rgba(255,255,255,0.3);
@@ -605,11 +748,14 @@ input { font: inherit; }
   backdrop-filter: blur(4px);
 }
 .quickchat-btn:active { background: rgba(255,255,255,0.2); }
+@media (orientation: landscape) and (max-height: 420px) {
+  .quickchat-btn { width: 38px; height: 38px; font-size: 16px; bottom: 122px; right: 18px; }
+}
 
 .quickchat-menu {
   position: absolute;
-  bottom: 80px;
-  right: 60px;
+  bottom: 210px;
+  right: 70px;
   display: none;
   flex-direction: column;
   gap: 4px;

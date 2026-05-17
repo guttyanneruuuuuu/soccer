@@ -84,12 +84,15 @@
         <button class="btn btn-ghost" id="btn-solo">🤖 Botと練習</button>
       </div>
       <p class="hint">
-        📱 <strong>横向き</strong>+<strong>ジャイロ</strong>で操作！<br>
+        📱 <strong>スマホ横向き</strong>+<strong>ジャイロ</strong>で操作！<br>
         🔄 左右に傾ける=ステア / 🪑 手前に倒す=ブレーキ・バック<br>
-        🚗 ACCEL(右下) で前進 / ⬆ JUMP(左下) でジャンプ・ダブルジャンプフリップ<br>
-        🛡 フィールドに浮かぶアイテムでパワーアップ ( SHIELD / MAGNET / GIANT / TURBO / SPRING )<br>
+        🚗 ACCEL=前進 / 🔥 BOOST=ブースト / ⬆ JUMP=ジャンプ・フリップ<br>
+        🌀 AIR ROLL=空中で押すとロール回転 (ステアが横回転に切替)<br>
+        🎥 カメラボタンで通常/ボール視点を切替<br>
+        ⚡ 最高速度を超えると <strong>SUPERSONIC</strong> 発動！コンボでスタイル加点<br>
+        🛡 アイテム ( SHIELD / MAGNET / GIANT / TURBO / SPRING )<br>
         💥 ブースト中の体当たりで敵車をデモリッション！<br>
-        最大 4v4（8人）のオンライン対戦＆Botと練習可能！
+        🏟 最大 4v4（8人）オンライン対戦 ＆ Bot 練習対応！
       </p>
       <p class="orientation-warn" id="orientation-warn">
         ⚠️ スマホを <strong>横向き</strong>にしてプレイしてね！
@@ -173,11 +176,33 @@
       <div id="brake-indicator" class="brake-indicator">🅑 BRAKE</div>
     </div>
 
-    <!-- タッチ操作: JUMP(左下) + ACCEL(右下) -->
+    <!-- タッチ操作 (横画面前提)
+         左下:   JUMP        親指で押しやすい大ボタン
+         右下:   ACCEL       同じくメインの右親指
+         左中:   AIR ROLL    空中でステアをロールに切り替えるサブボタン
+         右中:   BOOST       ホールドでブースト燃料を消費
+         右上:   CAMERA      ボール/通常 視点切替
+    -->
     <div class="touch-controls">
+      <button class="ctrl-btn ctrl-airroll" id="ctrl-airroll">🌀<br>AIR<br>ROLL</button>
       <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆<br>JUMP</button>
+      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥<br>BOOST</button>
       <button class="ctrl-btn ctrl-accel" id="ctrl-accel">🚗<br>ACCEL</button>
     </div>
+
+    <!-- ボール方向インジケーター (画面端の矢印) -->
+    <div id="ball-indicator" class="ball-indicator">
+      <div class="ball-indicator-inner">⚽<br><span class="ball-dist">--</span></div>
+    </div>
+
+    <!-- コンボメーター (連続ヒット表示) -->
+    <div id="combo-meter" class="combo-meter">
+      <span class="combo-label">COMBO</span>
+      <span class="combo-count" id="combo-count">0</span>
+    </div>
+
+    <!-- スーパーソニックインジケータ -->
+    <div id="supersonic-indicator" class="supersonic-indicator">⚡ SUPERSONIC ⚡</div>
 
     <!-- ミニマップ (上部右) -->
     <canvas id="minimap" width="160" height="120"></canvas>
@@ -199,6 +224,7 @@
 
     <!-- 設定 -->
     <div class="settings-stack">
+      <button class="btn-icon" id="btn-camera" title="カメラ視点切替 (V)">🎥</button>
       <button class="btn-icon" id="btn-recalibrate" title="ジャイロ再設定">⟲</button>
       <button class="btn-icon" id="btn-toggle-sens" title="感度">⚙</button>
       <button class="btn-icon" id="btn-pause" title="ポーズ / 退出">✕</button>
@@ -219,6 +245,12 @@
       </div>
       <div class="sens-row">
         <label class="invert-lbl"><input type="checkbox" id="sens-autoboost" /> 前傾でブースト</label>
+      </div>
+      <div class="sens-row">
+        <label class="invert-lbl"><input type="checkbox" id="sens-autoaccel" /> 前傾でアクセル(ACCEL不要)</label>
+      </div>
+      <div class="sens-row">
+        <label class="invert-lbl"><input type="checkbox" id="sens-ballcam" /> ボール視点デフォルト</label>
       </div>
       <div class="sens-row">
         <button type="button" id="sens-recal" class="btn btn-ghost btn-mini-wide">🧭 再キャリブレ</button>

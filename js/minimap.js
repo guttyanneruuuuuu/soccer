@@ -64,6 +64,21 @@ const Minimap = {
       ctx.fill();
     }
 
+    // パワーアップボックス
+    if (typeof PowerUps !== 'undefined' && PowerUps.boxes) {
+      for (const b of PowerUps.boxes) {
+        const meta = PowerUps.META[b.kind];
+        if (!meta) continue;
+        ctx.fillStyle = '#' + meta.color.toString(16).padStart(6, '0');
+        ctx.beginPath();
+        ctx.arc(toMx(b.x), toMz(b.z), 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
     // 車たち
     for (const car of Game.cars.values()) {
       if (car.respawnTimer > 0) continue;

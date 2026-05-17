@@ -3,21 +3,21 @@
 // ボールサイズ3倍 → 半径 10.8 (実物は ~0.93m だがプレイ性優先で大きく)
 const BallPhys = {
   RADIUS: 10.8,
-  GRAVITY: 14,            // 通常重力38 → ぐっと弱めて空中保持時間を伸ばす
-  AIR_FRICTION: 0.06,     // 風船らしく空気抵抗ややあり
-  GROUND_FRICTION: 0.5,
-  WALL_BOUNCE: 0.93,
-  FLOOR_BOUNCE: 0.78,
-  CEIL_BOUNCE: 0.82,
-  MAX_SPEED: 168,
+  GRAVITY: 15,            // 通常重力38 → ぐっと弱めて空中保持時間を伸ばす (微増14→15で落ちが速くなりすぎず)
+  AIR_FRICTION: 0.05,     // 風船らしく空気抵抗ややあり (0.06 → 0.05 で減速をマイルドに)
+  GROUND_FRICTION: 0.45,
+  WALL_BOUNCE: 0.92,
+  FLOOR_BOUNCE: 0.74,
+  CEIL_BOUNCE: 0.80,
+  MAX_SPEED: 170,
   // 車衝突時の反発係数 (1.0 以上で「むっちゃ飛ぶ」)
-  HIT_RESTITUTION: 1.38,
+  HIT_RESTITUTION: 1.42,
   // 車速度の何割を追加で乗せるか
-  HIT_VEL_TRANSFER: 0.75,
+  HIT_VEL_TRANSFER: 0.78,
   // 最低キック値 (ヒット感確保)
-  HIT_MIN_KICK: 14,
+  HIT_MIN_KICK: 16,
   // 衝突時に上方向に必ず加わる量
-  HIT_LIFT: 5.5,
+  HIT_LIFT: 6.0,
 };
 
 class Ball {
@@ -255,7 +255,7 @@ class Ball {
     }
   }
 
-  // 車との衝突: 高反発でボールを大きく飛ばす
+  // 車との衝突: 高反発でボールを大きく飛ばす + 車にも軽い反作用
   collideWithCar(car) {
     const dx = this.x - car.x;
     const dy = this.y - car.y;
@@ -265,12 +265,19 @@ class Ball {
     if (d2 >= minDist * minDist) return 0;
     const d = Math.sqrt(d2) || 0.0001;
 
-    // 押し出し（車側はあまり動かさない）
+    // 押し出し（車側もほんの少し押し返す: 打感を上げる)
     const nx = dx / d, ny = dy / d, nz = dz / d;
     const overlap = minDist - d;
-    this.x += nx * overlap * 1.0;
-    this.y += ny * overlap * 1.0;
-    this.z += nz * overlap * 1.0;
+    this.x += nx * overlap * 0.92;
+    this.y += ny * overlap * 0.92;
+    this.z += nz * overlap * 0.92;
+    // 車を反対方向に少し押し戻す (空中ヒット感UP・地上ではonGround保持のため水平のみ)
+    const carPushback = 0.08;
+    car.x -= nx * overlap * carPushback;
+    car.z -= nz * overlap * carPushback;
+    if (!car.onGround) {
+      car.y -= ny * overlap * carPushback;
+    }
 
     // 相対速度
     const rvx = this.vx - car.vx;
@@ -285,16 +292,33 @@ class Ball {
       this.vx += nx * j;
       this.vy += ny * j;
       this.vz += nz * j;
+      // 車にも反対方向の小さな反作用 (空中ヒット感)
+      if (!car.onGround) {
+        const carJ = j * 0.08;
+        car.vx -= nx * carJ;
+        car.vy -= ny * carJ * 0.4;
+        car.vz -= nz * carJ;
+      }
     }
 
     // 車の運動量を直接ボールに乗せる（「勢いのある車に当たるとむっちゃ飛ぶ」）
     const carSpeedMag = Math.sqrt(car.vx*car.vx + car.vy*car.vy + car.vz*car.vz);
-    // GIANTパワー時はキック力1.7倍
+    // GIANT パワー時はキック力 1.7 倍。スーパーソニック時はさらに+15%
     const giantBoost = (car.activePower === 'giant') ? 1.7 : 1.0;
-    const baseKick = (BallPhys.HIT_MIN_KICK + carSpeedMag * BallPhys.HIT_VEL_TRANSFER) * giantBoost;
+    const ssBoost = car.isSupersonic ? 1.15 : 1.0;
+    const baseKick = (BallPhys.HIT_MIN_KICK + carSpeedMag * BallPhys.HIT_VEL_TRANSFER) * giantBoost * ssBoost;
     this.vx += nx * baseKick;
     this.vy += ny * baseKick + BallPhys.HIT_LIFT * giantBoost;
     this.vz += nz * baseKick;
+
+    // フリップ中のヒットは追加でリフトとパワー (フリップシュート)
+    if (car.isFlipping) {
+      const fpx = Math.sin(car.angle);
+      const fpz = Math.cos(car.angle);
+      this.vx += fpx * 12;
+      this.vz += fpz * 12;
+      this.vy += 6;
+    }
 
     // 速度上限
     const sp = Math.sqrt(this.vx*this.vx + this.vy*this.vy + this.vz*this.vz);
