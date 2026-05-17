@@ -209,7 +209,7 @@ const Input = {
     if (!this.gyroCalibrated) {
       this.gyroSamples.push(steerVal);
       this.pitchSamples.push(pitchVal);
-      // 初期基準を少し厚めに取って端末差を吸収
+      // 16サンプルで初期姿勢を平均化し、端末ごとのセンサーノイズ差を吸収
       if (this.gyroSamples.length >= 16) {
         let avg = 0, pavg = 0;
         for (let i = 0; i < this.gyroSamples.length; i++) {
