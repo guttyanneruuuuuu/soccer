@@ -2,23 +2,27 @@
 // 公式 Rocket League のスタンダードフィールドは 102.4m × 81.92m × 20.48m。
 // この実寸を踏襲しつつ、空中プレーが楽しめるよう天井を高めに 42m に設定。
 // Z軸: 長辺(ゴール方向)。X軸: 短辺。Y軸: 上方向。
+const ARENA_SCALE = 6.0;
+
 const Arena = {
-  SCALE: 6.0,       // ユーザー要望: コートを約6倍へ
-  W: 82 * 6.0,            // 短辺(X) ハーフ幅 = 41
-  L: 104 * 6.0,           // 長辺(Z) ハーフ長 = 52
-  H: 42 * 6.0,            // 天井までの高さ
-  GOAL_W: 26 * 6.0,       // ゴール幅
-  GOAL_H: 13 * 6.0,       // ゴールの高さ
-  GOAL_DEPTH: 8 * 6.0,    // ゴール奥行き
+  SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
+  W: 82 * ARENA_SCALE,            // 短辺(X) ハーフ幅 = 41
+  L: 104 * ARENA_SCALE,           // 長辺(Z) ハーフ長 = 52
+  H: 42 * ARENA_SCALE,            // 天井までの高さ
+  GOAL_W: 26 * ARENA_SCALE,       // ゴール幅
+  GOAL_H: 13 * ARENA_SCALE,       // ゴールの高さ
+  GOAL_DEPTH: 8 * ARENA_SCALE,    // ゴール奥行き
   WALL_BOUNCE: 0.88,
   CEIL_BOUNCE: 0.78,
   FLOOR_BOUNCE: 0.55,
-  CORNER_INSET: 12 * 6.0, // コーナーを斜めにカットして丸い印象 (壁ライド演出)
+  CORNER_INSET: 12 * ARENA_SCALE, // コーナーを斜めにカットして丸い印象 (壁ライド演出)
+  PAD_PICKUP_RADIUS_BIG: 3.6 * ARENA_SCALE,
+  PAD_PICKUP_RADIUS_SMALL: 2.0 * ARENA_SCALE,
 
   group: null,
   boostPads: [],    // {x, z, big, active, recoverAt, mesh, ring}
   cornerWalls: [],  // {p1, p2, normal} — 斜めコーナー壁の衝突ライン (XZ平面)
-  EDGE_NORMAL_BLEND_DOT: 0.35, // 端点寄りで最近点法線へ切り替える閾値
+  EDGE_NORMAL_BLEND_DOT: 0.35, // dotが高い=最近点法線と内向き法線が近い(端点寄り)ため角として処理する
 
   build(scene) {
     const S = this.SCALE;
@@ -386,7 +390,7 @@ const Arena = {
       if (!p.active) continue;
       const dx = x - p.x, dz = z - p.z;
       const d2 = dx*dx + dz*dz;
-      const r = p.big ? 3.6 * this.SCALE : 2.0 * this.SCALE;
+      const r = p.big ? this.PAD_PICKUP_RADIUS_BIG : this.PAD_PICKUP_RADIUS_SMALL;
       if (d2 <= r * r) {
         p.active = false;
         p.mesh.material.opacity = 0.18;
