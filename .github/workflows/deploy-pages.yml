@@ -3,6 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches:
+      - genspark_ai_developer
       - main
       - master
   workflow_dispatch:
