@@ -2,23 +2,30 @@
 // 公式 Rocket League のスタンダードフィールドは 102.4m × 81.92m × 20.48m。
 // この実寸を踏襲しつつ、空中プレーが楽しめるよう天井を高めに 42m に設定。
 // Z軸: 長辺(ゴール方向)。X軸: 短辺。Y軸: 上方向。
+const ARENA_SCALE = 6.0;
+
 const Arena = {
-  W: 82,            // 短辺(X) ハーフ幅 = 41
-  L: 104,           // 長辺(Z) ハーフ長 = 52
-  H: 42,            // 天井までの高さ（公式の倍 = 空中プレー充実）
-  GOAL_W: 26,       // ゴール幅 (実寸 17.6 を少し広めに調整、ボール大型化に対応)
-  GOAL_H: 13,       // ゴールの高さ (実寸 6.4 + ボール大型化に合わせ拡大)
-  GOAL_DEPTH: 8,    // ゴール奥行き
+  SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
+  W: 82 * ARENA_SCALE,            // 短辺(X) ハーフ幅 = 41
+  L: 104 * ARENA_SCALE,           // 長辺(Z) ハーフ長 = 52
+  H: 42 * ARENA_SCALE,            // 天井までの高さ
+  GOAL_W: 26 * ARENA_SCALE,       // ゴール幅
+  GOAL_H: 13 * ARENA_SCALE,       // ゴールの高さ
+  GOAL_DEPTH: 8 * ARENA_SCALE,    // ゴール奥行き
   WALL_BOUNCE: 0.88,
   CEIL_BOUNCE: 0.78,
   FLOOR_BOUNCE: 0.55,
-  CORNER_INSET: 12, // コーナーを斜めにカットして丸い印象 (壁ライド演出)
+  CORNER_INSET: 12 * ARENA_SCALE, // コーナーを斜めにカットして丸い印象 (壁ライド演出)
+  PAD_PICKUP_RADIUS_BIG: 3.6 * ARENA_SCALE,
+  PAD_PICKUP_RADIUS_SMALL: 2.0 * ARENA_SCALE,
 
   group: null,
   boostPads: [],    // {x, z, big, active, recoverAt, mesh, ring}
   cornerWalls: [],  // {p1, p2, normal} — 斜めコーナー壁の衝突ライン (XZ平面)
+  EDGE_NORMAL_BLEND_DOT: 0.35, // dotが高い=最近点法線と内向き法線が近い(端点寄り)ため角として処理する
 
   build(scene) {
+    const S = this.SCALE;
     const g = new THREE.Group();
     this.group = g;
 
@@ -47,12 +54,12 @@ const Arena = {
       const [x2, z2] = edgePts[i + 1];
       const len = Math.hypot(x2 - x1, z2 - z1);
       const stripe = new THREE.Mesh(
-        new THREE.PlaneGeometry(len, 0.6),
+        new THREE.PlaneGeometry(len, 0.6 * S),
         edgeMat
       );
       stripe.rotation.x = -Math.PI / 2;
       stripe.rotation.z = Math.atan2(z2 - z1, x2 - x1);
-      stripe.position.set((x1 + x2) / 2, 0.12, (z1 + z2) / 2);
+      stripe.position.set((x1 + x2) / 2, 0.12 * S, (z1 + z2) / 2);
       g.add(stripe);
     }
 
@@ -65,7 +72,7 @@ const Arena = {
     ]), lineMat));
     // センターサークル
     const circlePts = [];
-    const cr = 14;
+    const cr = 14 * S;
     for (let i = 0; i <= 64; i++) {
       const t = (i / 64) * Math.PI * 2;
       circlePts.push(new THREE.Vector3(Math.cos(t) * cr, 0.05, Math.sin(t) * cr));
@@ -75,7 +82,7 @@ const Arena = {
     const spotPts = [];
     for (let i = 0; i <= 32; i++) {
       const t = (i / 32) * Math.PI * 2;
-      spotPts.push(new THREE.Vector3(Math.cos(t) * 1.4, 0.06, Math.sin(t) * 1.4));
+      spotPts.push(new THREE.Vector3(Math.cos(t) * 1.4 * S, 0.06, Math.sin(t) * 1.4 * S));
     }
     g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(spotPts),
       new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })));
@@ -83,8 +90,8 @@ const Arena = {
     // ペナルティエリア
     for (const sign of [-1, 1]) {
       const pa = [];
-      const paW = this.GOAL_W + 14;
-      const paD = 16;
+      const paW = this.GOAL_W + 14 * S;
+      const paD = 16 * S;
       const z0 = sign * (this.L/2 - paD);
       const z1 = sign * (this.L/2 - 0.5);
       pa.push(new THREE.Vector3(-paW/2, 0.05, z0));
@@ -94,8 +101,8 @@ const Arena = {
       pa.push(new THREE.Vector3(-paW/2, 0.05, z0));
       g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pa), lineMat));
       // ゴールエリア小
-      const gaW = this.GOAL_W + 4;
-      const gaD = 6;
+      const gaW = this.GOAL_W + 4 * S;
+      const gaD = 6 * S;
       const z2 = sign * (this.L/2 - gaD);
       const z3 = sign * (this.L/2 - 0.5);
       const ga = [
@@ -134,22 +141,22 @@ const Arena = {
 
       // 短辺壁にチームカラーの大型ネオンストライプ (上下2本)
       const teamMat = sign < 0 ? neonBlueMat : neonOrgMat;
-      const stripe1 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.6), teamMat);
-      stripe1.position.set(0, this.H - 1.5, sign * (this.L/2 - 0.05));
+      const stripe1 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.6 * S), teamMat);
+      stripe1.position.set(0, this.H - 1.5 * S, sign * (this.L/2 - 0.05));
       if (sign === 1) stripe1.rotation.y = Math.PI;
       g.add(stripe1);
-      const stripe2 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.4), teamMat);
-      stripe2.position.set(0, 2.5, sign * (this.L/2 - 0.05));
+      const stripe2 = new THREE.Mesh(new THREE.PlaneGeometry(shortSideLen, 0.4 * S), teamMat);
+      stripe2.position.set(0, 2.5 * S, sign * (this.L/2 - 0.05));
       if (sign === 1) stripe2.rotation.y = Math.PI;
       g.add(stripe2);
     }
 
     // 長辺壁にも青/橙の交互ネオンライン (上部)
     for (const sign of [-1, 1]) {
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(longSideLen, 0.5), 
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(longSideLen, 0.5 * S), 
         new THREE.MeshBasicMaterial({ color: 0x9c27b0 }));
       stripe.rotation.y = sign * Math.PI / 2;
-      stripe.position.set(sign * (this.W/2 - 0.05), this.H - 2.5, 0);
+      stripe.position.set(sign * (this.W/2 - 0.05), this.H - 2.5 * S, 0);
       g.add(stripe);
     }
 
@@ -223,11 +230,11 @@ const Arena = {
       // ゴールライン（床に光るライン）
       const glMat = new THREE.MeshBasicMaterial({ color: teamColor });
       const goalLine = new THREE.Mesh(
-        new THREE.PlaneGeometry(this.GOAL_W, 0.6),
+        new THREE.PlaneGeometry(this.GOAL_W, 0.6 * S),
         glMat
       );
       goalLine.rotation.x = -Math.PI / 2;
-      goalLine.position.set(0, 0.07, sign * this.L/2);
+      goalLine.position.set(0, 0.07 * S, sign * this.L/2);
       g.add(goalLine);
     }
 
@@ -241,7 +248,7 @@ const Arena = {
     g.add(ceil);
 
     // 天井のグリッド模様
-    const grid = new THREE.GridHelper(Math.max(this.W, this.L), 16, 0x4fc3f7, 0x4fc3f7);
+    const grid = new THREE.GridHelper(Math.max(this.W, this.L), Math.max(16, Math.round(16 * S)), 0x4fc3f7, 0x4fc3f7);
     grid.position.y = this.H - 0.05;
     grid.material.transparent = true;
     grid.material.opacity = 0.18;
@@ -251,35 +258,35 @@ const Arena = {
     this.boostPads = [];
     const padPositions = [
       // 大(Big, 100%) - フィールド両側の中央(2) + 4コーナー手前(4)
-      { x: -this.W/2 + 6,  z: 0, big: true },
-      { x:  this.W/2 - 6,  z: 0, big: true },
-      { x: -this.W/2 + 6,  z: -this.L/2 + this.CORNER_INSET + 6, big: true },
-      { x:  this.W/2 - 6,  z: -this.L/2 + this.CORNER_INSET + 6, big: true },
-      { x: -this.W/2 + 6,  z:  this.L/2 - this.CORNER_INSET - 6, big: true },
-      { x:  this.W/2 - 6,  z:  this.L/2 - this.CORNER_INSET - 6, big: true },
+      { x: -this.W/2 + 6 * S,  z: 0, big: true },
+      { x:  this.W/2 - 6 * S,  z: 0, big: true },
+      { x: -this.W/2 + 6 * S,  z: -this.L/2 + this.CORNER_INSET + 6 * S, big: true },
+      { x:  this.W/2 - 6 * S,  z: -this.L/2 + this.CORNER_INSET + 6 * S, big: true },
+      { x: -this.W/2 + 6 * S,  z:  this.L/2 - this.CORNER_INSET - 6 * S, big: true },
+      { x:  this.W/2 - 6 * S,  z:  this.L/2 - this.CORNER_INSET - 6 * S, big: true },
     ];
     // 小(Small, 12%) - フィールド全体に散らす
     const smallGrid = [
       // センターライン上の左右
-      [-12, 0], [12, 0],
+      [-12 * S, 0], [12 * S, 0],
       // セカンドゾーン
-      [-26, -18], [-12, -18], [0, -18], [12, -18], [26, -18],
-      [-26,  18], [-12,  18], [0,  18], [12,  18], [26,  18],
+      [-26 * S, -18 * S], [-12 * S, -18 * S], [0, -18 * S], [12 * S, -18 * S], [26 * S, -18 * S],
+      [-26 * S,  18 * S], [-12 * S,  18 * S], [0,  18 * S], [12 * S,  18 * S], [26 * S,  18 * S],
       // 自陣・敵陣 中盤
-      [-22, -34], [0, -34], [22, -34],
-      [-22,  34], [0,  34], [22,  34],
+      [-22 * S, -34 * S], [0, -34 * S], [22 * S, -34 * S],
+      [-22 * S,  34 * S], [0,  34 * S], [22 * S,  34 * S],
       // ペナルティエリア外
-      [-30, -42], [30, -42],
-      [-30,  42], [30,  42],
+      [-30 * S, -42 * S], [30 * S, -42 * S],
+      [-30 * S,  42 * S], [30 * S,  42 * S],
       // 縦長で散らす
-      [0, -8], [0, 8],
-      [-32, 0], [32, 0],
-      [-18, -8], [18, -8], [-18, 8], [18, 8],
+      [0, -8 * S], [0, 8 * S],
+      [-32 * S, 0], [32 * S, 0],
+      [-18 * S, -8 * S], [18 * S, -8 * S], [-18 * S, 8 * S], [18 * S, 8 * S],
     ];
     for (const [x, z] of smallGrid) padPositions.push({ x, z, big: false });
 
     for (const p of padPositions) {
-      const r = p.big ? 3.2 : 1.6;
+      const r = p.big ? 3.2 * S : 1.6 * S;
       const padGeo = new THREE.CircleGeometry(r, p.big ? 24 : 16);
       const padMat = new THREE.MeshBasicMaterial({
         color: p.big ? 0xff8800 : 0xffff66, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
@@ -305,20 +312,20 @@ const Arena = {
     }
 
     // ===== スカイドーム / 観客席表現 =====
-    const skyGeo = new THREE.SphereGeometry(360, 24, 12, 0, Math.PI*2, 0, Math.PI/2);
+    const skyGeo = new THREE.SphereGeometry(360 * S, 24, 12, 0, Math.PI*2, 0, Math.PI/2);
     const skyMat = new THREE.MeshBasicMaterial({
       color: 0x1a3a6b, side: THREE.BackSide,
     });
     const sky = new THREE.Mesh(skyGeo, skyMat);
-    sky.position.y = -5;
+    sky.position.y = -5 * S;
     g.add(sky);
 
     // 観客席(リング状の暗色ブロック)
     const standMat = new THREE.MeshLambertMaterial({ color: 0x1a2535 });
-    const standGeo = new THREE.RingGeometry(80, 200, 32);
+    const standGeo = new THREE.RingGeometry(80 * S, 200 * S, 32);
     const stand = new THREE.Mesh(standGeo, standMat);
     stand.rotation.x = -Math.PI / 2;
-    stand.position.y = -0.5;
+    stand.position.y = -0.5 * S;
     g.add(stand);
 
     scene.add(g);
@@ -383,7 +390,7 @@ const Arena = {
       if (!p.active) continue;
       const dx = x - p.x, dz = z - p.z;
       const d2 = dx*dx + dz*dz;
-      const r = p.big ? 3.6 : 2.0;
+      const r = p.big ? this.PAD_PICKUP_RADIUS_BIG : this.PAD_PICKUP_RADIUS_SMALL;
       if (d2 <= r * r) {
         p.active = false;
         p.mesh.material.opacity = 0.18;
@@ -398,34 +405,50 @@ const Arena = {
   // コーナー壁(XZ斜め線)との衝突を解決する。
   // 円(x,z,r)とラインセグメント p1->p2 の最短距離が r 未満なら法線方向に押し戻し速度反射。
   resolveCornerCollision(obj, radius, restitution = 0.8) {
-    for (const cw of this.cornerWalls) {
-      const ax = obj.x - cw.p1.x;
-      const az = obj.z - cw.p1.y;
-      const bx = cw.p2.x - cw.p1.x;
-      const bz = cw.p2.y - cw.p1.y;
-      const t = Utils.clamp((ax * bx + az * bz) / (cw.len * cw.len), 0, 1);
-      const px = cw.p1.x + bx * t;
-      const pz = cw.p1.y + bz * t;
-      const dx = obj.x - px;
-      const dz = obj.z - pz;
-      const dist2 = dx*dx + dz*dz;
-      if (dist2 >= radius * radius) continue;
-      // 反射: 法線=正規化(dx,dz) — ただし内向き法線(cw.nx,cw.nz)に近い側
-      let nx = dx, nz = dz;
-      const d = Math.sqrt(dist2) || 0.0001;
-      nx /= d; nz /= d;
-      // 内向きに合わせる
-      if (nx * cw.nx + nz * cw.nz < 0) { nx = -nx; nz = -nz; }
-      const overlap = radius - d;
-      obj.x += nx * overlap;
-      obj.z += nz * overlap;
-      const vDot = (obj.vx || 0) * nx + (obj.vz || 0) * nz;
-      if (vDot < 0) {
-        obj.vx -= (1 + restitution) * vDot * nx;
-        obj.vz -= (1 + restitution) * vDot * nz;
+    let hit = false;
+    for (let iter = 0; iter < 3; iter++) {
+      let pushed = false;
+      for (const cw of this.cornerWalls) {
+        const ax = obj.x - cw.p1.x;
+        const az = obj.z - cw.p1.y;
+        const bx = cw.p2.x - cw.p1.x;
+        const bz = cw.p2.y - cw.p1.y;
+        const t = Utils.clamp((ax * bx + az * bz) / (cw.len * cw.len), 0, 1);
+        const px = cw.p1.x + bx * t;
+        const pz = cw.p1.y + bz * t;
+        const dx = obj.x - px;
+        const dz = obj.z - pz;
+        const dist2 = dx*dx + dz*dz;
+        const d = Math.sqrt(dist2) || 0.0001;
+        const signed = dx * cw.nx + dz * cw.nz;
+        const faceOverlap = radius - signed; // 壁面を跨いだすり抜け用
+        const pointOverlap = radius - d;     // 端点/角のめり込み用
+
+        // すり抜け防止: 基本は壁内向き法線、端点寄りなら最近点法線で処理
+        let nx = cw.nx, nz = cw.nz;
+        let overlap = faceOverlap;
+        if (d > 0.0001) {
+          const ex = dx / d, ez = dz / d;
+          const edgeDot = ex * cw.nx + ez * cw.nz;
+          if (edgeDot > this.EDGE_NORMAL_BLEND_DOT) {
+            nx = ex; nz = ez;
+            overlap = pointOverlap;
+          }
+        }
+        if (overlap <= 0) continue;
+
+        obj.x += nx * overlap;
+        obj.z += nz * overlap;
+        const vDot = (obj.vx || 0) * nx + (obj.vz || 0) * nz;
+        if (vDot < 0) {
+          obj.vx -= (1 + restitution) * vDot * nx;
+          obj.vz -= (1 + restitution) * vDot * nz;
+        }
+        hit = true;
+        pushed = true;
       }
-      return true;
+      if (!pushed) break;
     }
-    return false;
+    return hit;
   },
 };

@@ -31,13 +31,13 @@ const Input = {
   _safeStorage: null,
 
   // 設定値 (操作性改善後)
-  sensitivity: 14,   // 左右ステアの感度 (度) - 18 → 14 (より敏感)
-  deadzone: 1.2,     // デッドゾーン縮小 (1.5 → 1.2)
+  sensitivity: 10,   // 左右ステア感度を上げて直感操作に寄せる
+  deadzone: 0.8,     // 小さい傾きでも曲がり始める
   invert: false,
-  pitchSensitivity: 18,    // ピッチ用の感度 (度) - 22 → 18
-  pitchDeadzone: 3.5,      // 4 → 3.5
-  brakeThreshold: 0.32,    // |pitch| > 0.32 (後傾) でブレーキ
-  boostThreshold: 0.45,    // 前傾 強で自動ブースト (オプション)
+  pitchSensitivity: 14,
+  pitchDeadzone: 2.2,
+  brakeThreshold: 0.24,
+  boostThreshold: 0.34,
   autoBoost: false,        // 前傾でブーストするか (デフォルトOFF)
 
   _keys: {},
@@ -189,26 +189,18 @@ const Input = {
     const fallbackLandscape = normAngle !== 90 && normAngle !== 270 &&
       ((orientationType && orientationType.startsWith('landscape')) || window.innerWidth > window.innerHeight);
 
-    // ステア用とピッチ用の値を画面向きに応じて選ぶ
-    let steerVal, pitchVal;
-    if (normAngle === 90) {
-      // 横向き(landscape primary): 横軸=beta, 縦軸=gamma
-      steerVal = b;
-      pitchVal = -g;
-    } else if (normAngle === 270) {
-      steerVal = -b;
-      pitchVal = g;
-    } else if (fallbackLandscape) {
+    // ステア用/ピッチ用を画面回転に追従して算出（直感操作重視）
+    let mappedAngle = normAngle;
+    if (fallbackLandscape) {
       if (orientationType.includes('secondary')) this._fallbackLandscapeSign = -1;
       else if (orientationType.includes('primary')) this._fallbackLandscapeSign = 1;
       else if (Math.abs(g) > 8) this._fallbackLandscapeSign = g >= 0 ? 1 : -1;
-      steerVal = b * this._fallbackLandscapeSign;
-      pitchVal = -g * this._fallbackLandscapeSign;
-    } else {
-      // 縦持ち: 横軸=gamma, 縦軸=beta
-      steerVal = g;
-      pitchVal = b;
+      mappedAngle = this._fallbackLandscapeSign > 0 ? 90 : 270;
     }
+    const rad = mappedAngle * Math.PI / 180;
+    const cosA = Math.cos(rad), sinA = Math.sin(rad);
+    const steerVal = g * cosA + b * sinA;
+    const pitchVal = -g * sinA + b * cosA;
 
     this.gyroRaw = steerVal;
     this.pitchRaw = pitchVal;
@@ -217,7 +209,8 @@ const Input = {
     if (!this.gyroCalibrated) {
       this.gyroSamples.push(steerVal);
       this.pitchSamples.push(pitchVal);
-      if (this.gyroSamples.length >= 20) {
+      // 12サンプルで初動遅延を減らし、以降はベース追従で安定化する（ノイズ端末では20より基準精度が落ちうる）
+      if (this.gyroSamples.length >= 12) {
         let avg = 0, pavg = 0;
         for (let i = 0; i < this.gyroSamples.length; i++) {
           avg += this.gyroSamples[i];
@@ -244,7 +237,7 @@ const Input = {
     if (Math.abs(diff) < this.deadzone) diff = 0;
     else diff -= Math.sign(diff) * this.deadzone;
     const norm = Utils.clamp(diff / this.sensitivity, -1.2, 1.2);
-    const curved = Math.sign(norm) * Math.pow(Math.min(1, Math.abs(norm)), 1.30);
+    const curved = Math.sign(norm) * Math.pow(Math.min(1, Math.abs(norm)), 1.10);
     let target = -Utils.clamp(curved, -1, 1);
     if (this.invert) target = -target;
 
@@ -258,14 +251,14 @@ const Input = {
     if (Math.abs(pdiff) < this.pitchDeadzone) pdiff = 0;
     else pdiff -= Math.sign(pdiff) * this.pitchDeadzone;
     const pnorm = Utils.clamp(pdiff / this.pitchSensitivity, -1.2, 1.2);
-    const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.20);
+    const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.05);
     const ptarget = Utils.clamp(pcurved, -1, 1);
 
-    // ローパスフィルタ (応答性アップ: 18→28, 上限0.65→0.85)
+    // ローパスフィルタ (初動を速めつつノイズは抑える)
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
-    const alpha = Utils.clamp(dt * 28, 0.35, 0.85);
+    const alpha = Utils.clamp(dt * 36, 0.45, 0.9);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
     this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha);
 

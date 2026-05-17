@@ -40,13 +40,13 @@ const Game = {
     const scene = new THREE.Scene();
     // 夜間スタジアム風: 深い青紫
     scene.background = new THREE.Color(0x0a1428);
-    scene.fog = new THREE.Fog(0x0a1428, 140, 380);
+    scene.fog = new THREE.Fog(0x0a1428, Arena.L * 0.45, Arena.L * 2.6);
     this.scene = scene;
 
     const aspect = window.innerWidth / window.innerHeight;
     // 基本FOV=68 (キビキビ感とスケール感のバランス)。ブースト中に動的に上がる。
-    this.camera = new THREE.PerspectiveCamera(68, aspect, 0.1, 1200);
-    this.camera.position.set(0, 18, -42);
+    this.camera = new THREE.PerspectiveCamera(68, aspect, 0.1, 5200);
+    this.camera.position.set(0, 40, -120);
     this.camera.lookAt(0, 0, 0);
     this._camLook = { x: 0, y: 0, z: 0 };
     this._camShake = 0;
@@ -62,28 +62,29 @@ const Game = {
     scene.add(amb);
     // メインの天上ライト (スタジアム照明)
     const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-    sun.position.set(40, 130, 50);
+    sun.position.set(Arena.W * 0.45, Arena.H * 0.9, Arena.L * 0.35);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -100;
-    sun.shadow.camera.right = 100;
-    sun.shadow.camera.top = 110;
-    sun.shadow.camera.bottom = -110;
+    const shadowSpan = Math.max(Arena.W, Arena.L) * 0.65;
+    sun.shadow.camera.left = -shadowSpan;
+    sun.shadow.camera.right = shadowSpan;
+    sun.shadow.camera.top = shadowSpan;
+    sun.shadow.camera.bottom = -shadowSpan;
     sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 320;
+    sun.shadow.camera.far = Arena.H * 3.8;
     scene.add(sun);
 
     // 反対側からのフィルライト (青寄り)
     const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
-    fill.position.set(-60, 90, -40);
+    fill.position.set(-Arena.W * 0.5, Arena.H * 0.65, -Arena.L * 0.3);
     scene.add(fill);
 
     // チームカラーの間接光 (両ゴール側)
-    const goalLightBlue = new THREE.PointLight(0x29b6f6, 0.65, 90, 2);
-    goalLightBlue.position.set(0, 15, -52);
+    const goalLightBlue = new THREE.PointLight(0x29b6f6, 0.65, Arena.L * 0.8, 2);
+    goalLightBlue.position.set(0, Arena.H * 0.35, -Arena.L / 2);
     scene.add(goalLightBlue);
-    const goalLightOrg = new THREE.PointLight(0xff7043, 0.65, 90, 2);
-    goalLightOrg.position.set(0, 15, 52);
+    const goalLightOrg = new THREE.PointLight(0xff7043, 0.65, Arena.L * 0.8, 2);
+    goalLightOrg.position.set(0, Arena.H * 0.35, Arena.L / 2);
     scene.add(goalLightOrg);
 
     // ヘミスフィア (空青/床ダーク)
@@ -127,12 +128,12 @@ const Game = {
     const orgList  = players.filter(p => p.team === 'orange');
     const spawn = (list, zSign) => {
       list.forEach((p, i) => {
-        const xOff = (i - (list.length - 1) / 2) * 10;
+        const xOff = (i - (list.length - 1) / 2) * 16;
         const isLocal = (p.id === this.myInfo.id) || p.isLocal;
         const car = new Car({
           id: p.id, name: p.name, color: p.color, team: p.team,
           isLocal, isRemote: !isLocal,
-          x: xOff, z: zSign * (Arena.L / 2 - 20),
+          x: xOff, z: zSign * (Arena.L / 2 - 20 * Arena.SCALE),
           angle: zSign < 0 ? 0 : Math.PI,
         });
         this.cars.set(p.id, car);
@@ -392,7 +393,7 @@ const Game = {
       if (p.active) continue;
       const dx = this.localCar.x - p.x;
       const dz = this.localCar.z - p.z;
-      const r2 = (p.big ? 3.6 : 2.0);
+      const r2 = (p.big ? Arena.PAD_PICKUP_RADIUS_BIG : Arena.PAD_PICKUP_RADIUS_SMALL);
       if (dx * dx + dz * dz < r2 * r2 + 1 && !p._sfxPlayed) {
         SFX.boostPad(p.big);
         p._sfxPlayed = true;
@@ -642,9 +643,9 @@ const Game = {
     const orgList = Array.from(this.cars.values()).filter(c => c.team === 'orange');
     const resetTeam = (list, zSign) => {
       list.forEach((c, i) => {
-        const xOff = (i - (list.length - 1) / 2) * 10;
+        const xOff = (i - (list.length - 1) / 2) * 16;
         c.x = xOff;
-        c.z = zSign * (Arena.L / 2 - 20);
+        c.z = zSign * (Arena.L / 2 - 20 * Arena.SCALE);
         c.y = CarPhys.HEIGHT;
         c.vx = c.vy = c.vz = 0;
         c.speed = 0;
@@ -676,18 +677,18 @@ const Game = {
     // ===== ロケットリーグ風シネマティックカメラ =====
     // 車のすぐ後ろ・低めから車を「でかく」捉える + ボールトラッキング
     // 基本距離を近く・低く。スピードでわずかに後退するのでスピード感も出る。
-    const baseBack = 11.0;   // 22 → 11 (約半分)
-    const baseUp   = 4.5;    // 9  → 4.5
+    const baseBack = 21.0;
+    const baseUp   = 9.0;
     const sp = Math.abs(car.speed);
     const speedRatio = Utils.clamp(sp / CarPhys.MAX_SPEED, 0, 1);
     const boostRatio = Utils.clamp((sp - CarPhys.MAX_SPEED) / (CarPhys.MAX_SPEED_BOOST - CarPhys.MAX_SPEED), 0, 1);
 
     // 速度が上がるほど後ろに引く＋少しだけ上げる (ダイナミック感)
-    const dynBack = baseBack + speedRatio * 3.5 + boostRatio * 2.5;
-    const dynUp   = baseUp   + speedRatio * 1.2;
+    const dynBack = baseBack + speedRatio * 8.0 + boostRatio * 5.0;
+    const dynUp   = baseUp   + speedRatio * 2.8;
 
     // 空中時はカメラを少し上に
-    const airUp = car.onGround ? 0 : Math.min(3.5, (car.y - CarPhys.HEIGHT) * 0.18);
+    const airUp = car.onGround ? 0 : Math.min(8.0, (car.y - CarPhys.HEIGHT) * 0.2);
 
     const camX = car.x - Math.sin(car.angle) * dynBack;
     const camZ = car.z - Math.cos(car.angle) * dynBack;
@@ -706,13 +707,13 @@ const Game = {
     const distBall = Math.sqrt(dxb*dxb + dzb*dzb);
 
     // 車前方の注視点を遠めに
-    const forwardLookDist = 14 + speedRatio * 8;
+    const forwardLookDist = 26 + speedRatio * 14;
     let lookX = car.x + Math.sin(car.angle) * forwardLookDist;
     let lookZ = car.z + Math.cos(car.angle) * forwardLookDist;
     let lookY = car.y + 2.0;
 
     // ボールが視野内かつ近いほど強くブレンド (最大 60%)
-    const ballMaxDist = 55;
+    const ballMaxDist = 240;
     if (distBall < ballMaxDist) {
       // 車正面方向とボール方向のドット積で「視野内」を判定
       const fx = Math.sin(car.angle), fz = Math.cos(car.angle);
