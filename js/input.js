@@ -30,15 +30,19 @@ const Input = {
   _fallbackLandscapeSign: 1,
   _safeStorage: null,
 
-  // 設定値 (ジャイロ安定化)
-  sensitivity: 12,
-  deadzone: 1.2,
+  // 設定値 (ジャイロ安定化) - 操作性向上のため再チューニング
+  // sensitivity: 値が小さいほど傾けに敏感。18°でフル切り (UI スライダーのデフォルト)
+  sensitivity: 18,
+  deadzone: 0.8,           // 微小入力でも反応するように小さく (1.2 → 0.8)
   invert: false,
-  pitchSensitivity: 16,
-  pitchDeadzone: 2.8,
-  brakeThreshold: 0.3,
-  boostThreshold: 0.34,
+  // ピッチ系: ブレーキ誤動作を防ぐためデッドゾーンとしきい値を大きめに
+  pitchSensitivity: 18,
+  pitchDeadzone: 4.0,       // 持ち上げ時のブレーキ誤動作軽減 (2.8 → 4.0)
+  brakeThreshold: 0.45,     // ブレーキ発動しきい値を上げる (0.3 → 0.45)
+  boostThreshold: 0.42,
   autoBoost: false,        // 前傾でブーストするか (デフォルトOFF)
+  // 中央付近のレスポンスを柔らかく、端付近を強くする (非線形カーブ)
+  steerCurveExp: 1.45,     // 1.0 = 直線、>1 = 中央緩やか・端急角度
 
   _keys: {},
 
@@ -50,10 +54,17 @@ const Input = {
     if (invSaved === '1') this.invert = true;
     const ab = this._storageGet('soccer-autoboost');
     if (ab === '1') this.autoBoost = true;
+    const curve = parseFloat(this._storageGet('soccer-curve'));
+    if (!isNaN(curve) && curve >= 1.0 && curve <= 2.0) this.steerCurveExp = curve;
 
     this._bindKeys();
     this._bindTouch();
     this._setupAutoCalibrate();
+  },
+
+  setCurve(v) {
+    this.steerCurveExp = Utils.clamp(v, 1.0, 2.0);
+    this._storageSet('soccer-curve', String(this.steerCurveExp));
   },
 
   _setupAutoCalibrate() {
@@ -85,13 +96,19 @@ const Input = {
   },
 
   _updateFromKeys() {
-    // ジャイロが無効なときに限り、キーボードでステア + ブレーキできる
+    // ジャイロが無効なときに限り、キーボードでステア + ブレーキ
     if (this.gyroEnabled) return;
     const keys = this._keys;
     const lr = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
     this._keySteer = lr;
     this.brake = !!(keys['arrowdown'] || keys['s']);
     this.accel = !!(keys['arrowup'] || keys['w']);
+  },
+  // ジャイロ ON でもキーボード入力をマージ (PC でテストしやすく)
+  _keyboardOverride() {
+    const keys = this._keys;
+    if (keys['arrowup'] || keys['w']) this.accel = true;
+    if (keys['arrowdown'] || keys['s']) this.brake = true;
   },
 
   _bindTouch() {
@@ -147,6 +164,9 @@ const Input = {
       const alpha = Utils.clamp(dt * response, 0.28, 0.85);
       this.steer = Utils.lerp(this.steer, target, alpha);
       if (Math.abs(this.steer) < 0.001 && target === 0) this.steer = 0;
+    } else {
+      // ジャイロ ON でも PC キーボードで accel/brake をオーバーライド (デバッグ用)
+      this._keyboardOverride();
     }
   },
 
@@ -229,44 +249,56 @@ const Input = {
 
     // ===== ステアリング =====
     let diff = steerVal - this.gyroBase;
-    // 微弱ドリフト追従
-    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 2.3) {
-      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.009);
+    // 微弱ドリフト追従 (端末が物理的にずれたときのキャリブ補正)
+    // ステアは即応性が大事なので追従はゆっくり、デッドゾーン内のみ
+    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 1.8) {
+      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.006);
       diff = steerVal - this.gyroBase;
     }
     if (Math.abs(diff) < this.deadzone) diff = 0;
     else diff -= Math.sign(diff) * this.deadzone;
+    // sensitivity(度)で正規化。中央緩やか・端急角度の曲線で「微調整しやすい」
     const norm = Utils.clamp(diff / this.sensitivity, -1.2, 1.2);
-    const curved = Math.sign(norm) * Math.pow(Math.min(1, Math.abs(norm)), 1.10);
+    // exp > 1: 中央近くを優しく、端で強く反応 → 直進維持しやすい
+    const absNorm = Math.min(1, Math.abs(norm));
+    const curved = Math.sign(norm) * Math.pow(absNorm, this.steerCurveExp);
     let target = -Utils.clamp(curved, -1, 1);
     if (this.invert) target = -target;
 
     // ===== ピッチ (ブレーキ/ブースト判定) =====
     let pdiff = pitchVal - this.pitchBase;
-    // ピッチ基準はゆっくり追従するがステアより遅め
-    if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.4) {
-      this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.0045);
+    // ピッチ基準はゆっくり追従。ブレーキの誤発動を防ぐためデッドゾーンを広めに
+    if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.2) {
+      this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.003);
       pdiff = pitchVal - this.pitchBase;
     }
     if (Math.abs(pdiff) < this.pitchDeadzone) pdiff = 0;
     else pdiff -= Math.sign(pdiff) * this.pitchDeadzone;
     const pnorm = Utils.clamp(pdiff / this.pitchSensitivity, -1.2, 1.2);
-    const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.05);
+    // ピッチも非線形に。空中時のエア操作にも使用される
+    const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.2);
     const ptarget = Utils.clamp(pcurved, -1, 1);
 
-    // ローパスフィルタ (初動を速めつつノイズは抑える)
+    // 適応的ローパス: 急変時(差が大)は高速追従、微小ノイズはなだらかに
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
-    const alpha = Utils.clamp(dt * 30, 0.35, 0.82);
+    const delta = Math.abs(target - this._smoothed);
+    // 入力差が大きい(=ステア切ろうとしている)ほど早く追従
+    const alpha = Utils.clamp(dt * (28 + delta * 32), 0.32, 0.92);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
-    this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha);
+    this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha * 0.85);
 
     this.steer = this._smoothed;
     this.pitch = this._pitchSmoothed;
 
     // ピッチ後傾 (端末を起こす方向: pitch > 0) でブレーキ
-    this.brake = (this.pitch > this.brakeThreshold);
+    // ヒステリシスでチャタリング防止
+    if (this.brake) {
+      this.brake = (this.pitch > this.brakeThreshold * 0.65);
+    } else {
+      this.brake = (this.pitch > this.brakeThreshold);
+    }
     // ピッチ前傾 でオプションブースト (デフォルト OFF。ジャンプボタンで集中。ブーストボタンが優先)
     if (this.autoBoost && !this._keys['shift']) {
       this.boost = (this.pitch < -this.boostThreshold);

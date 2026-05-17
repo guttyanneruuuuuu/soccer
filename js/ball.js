@@ -27,6 +27,7 @@ class Ball {
     this.spin = 0;
     this.spinAxis = new THREE.Vector3(1, 0, 0);
     this.lastHitter = null;
+    this.previousHitter = null;     // ゴール時のアシスト判定用 (前回ヒッター)
     this.lastHitTime = 0;
     this._hitFlashTimer = 0;
 
@@ -119,6 +120,7 @@ class Ball {
     this.vx = 0; this.vy = 0; this.vz = 0;
     this.spin = 0;
     this.lastHitter = null;
+    this.previousHitter = null;
     this._hitFlashTimer = 0;
     if (this.glow) this.glow.material.opacity = 0;
     // トレイルもクリア
@@ -301,6 +303,10 @@ class Ball {
       this.vx *= s; this.vy *= s; this.vz *= s;
     }
 
+    // アシスト用に直前のヒッターを記憶
+    if (this.lastHitter && this.lastHitter !== car.id) {
+      this.previousHitter = this.lastHitter;
+    }
     this.lastHitter = car.id;
     this.lastHitTime = performance.now();
     this._hitFlashTimer = 0.45;
@@ -325,6 +331,36 @@ class Ball {
     this.z = Utils.lerp(this.z, state.z, 0.5);
     this.vx = state.vx; this.vy = state.vy; this.vz = state.vz;
     this.mesh.position.set(this.x, this.y, this.z);
+  }
+
+  // クライアント用: パケット間 (50ms間隔) の見た目を滑らかに保つ簡易物理予測
+  // 重力・摩擦・最大速度のみを反映し、衝突や反発は次のパケットで上書きされる前提。
+  clientPredict(dt) {
+    // 重力
+    this.vy -= BallPhys.GRAVITY * dt;
+    // 空気抵抗
+    const af = Math.pow(1 - BallPhys.AIR_FRICTION, dt);
+    this.vx *= af; this.vy *= af; this.vz *= af;
+    // 速度上限
+    const sp = Math.sqrt(this.vx*this.vx + this.vy*this.vy + this.vz*this.vz);
+    if (sp > BallPhys.MAX_SPEED) {
+      const s = BallPhys.MAX_SPEED / sp;
+      this.vx *= s; this.vy *= s; this.vz *= s;
+    }
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.z += this.vz * dt;
+    // 床通過防止 (見た目的に)
+    if (this.y < BallPhys.RADIUS) {
+      this.y = BallPhys.RADIUS;
+      if (this.vy < 0) this.vy *= -BallPhys.FLOOR_BOUNCE;
+    }
+    this.mesh.position.set(this.x, this.y, this.z);
+    if (this.shadow) {
+      this.shadow.position.set(this.x, 0.1, this.z);
+      const shScale = Utils.clamp(1 - this.y / Arena.H * 0.65, 0.35, 1.05);
+      this.shadow.scale.set(shScale, shScale, shScale);
+    }
   }
 
   getNetState() {

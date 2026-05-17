@@ -6,17 +6,19 @@ const CarPhys = {
   RADIUS: 4.8,
   HEIGHT: 3.4,
 
-  // 速度パラメタ (操作感アップ)
+  // 速度パラメタ (操作感アップ + キビキビした応答)
   MAX_SPEED: 76,
   MAX_SPEED_BOOST: 100,
-  ACCEL: 60,
-  REVERSE_ACCEL: 26,
-  BRAKE: 62,
-  FRICTION: 3.1,
+  ACCEL: 64,             // 60 → 64: 加速ややキビキビ
+  REVERSE_ACCEL: 28,
+  BRAKE: 78,             // 62 → 78: ブレーキを強めに (急停止可能)
+  FRICTION: 3.4,
   AIR_FRICTION: 0.34,
-  STEER_SPEED: 3.0,
-  STEER_AT_SPEED: 0.62,
+  STEER_SPEED: 3.25,     // 3.0 → 3.25: 旋回はやや速く
+  STEER_AT_SPEED: 0.55,  // 高速時のステア効きを下げて挙動安定
   LATERAL_GRIP: 11.0,
+  // 低速での旋回ボーナス (止まりかけでクイック切返し可能)
+  STEER_LOW_SPEED_BONUS: 1.4,
 
   // 物理 (ジャンプ強化)
   GRAVITY: 42,
@@ -285,7 +287,9 @@ class Car {
       if (this.onGround) {
         // 地上はヨー (ハンドル) — 後進中は逆向きに効くと自然
         const dir = this.speed >= 0 ? 1 : -1;
-        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * dir * dt;
+        // 低速で旋回しやすく (止まっていれば即その場で回頭)
+        const lowSpeedBoost = 1 + (1 - speedRatio) * (CarPhys.STEER_LOW_SPEED_BONUS - 1);
+        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * lowSpeedBoost * dir * dt;
         // 地上のロール演出 (見た目だけ。コーナリングで車体が傾く)
         const targetRoll = -input.steer * Math.min(0.18, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.25);
         this.roll = Utils.lerp(this.roll, targetRoll, dt * 6);

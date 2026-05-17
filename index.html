@@ -8,7 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Gyro Soccer Arena ⚽ スマホでカーサッカー</title>
+  <meta name="description" content="スマホのジャイロで車を操作するロケットリーグ風サッカーゲーム。ソロ・オンライン対戦・パワーアップアイテム搭載。" />
   <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="apple-touch-icon" href="favicon.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -55,6 +57,24 @@
           <button type="button" class="size-option" data-size="2">2v2</button>
           <button type="button" class="size-option active" data-size="3">3v3</button>
           <button type="button" class="size-option" data-size="4">4v4</button>
+        </div>
+      </div>
+
+      <div class="size-select">
+        <label>Bot 難易度（ソロ）</label>
+        <div class="size-options" id="bot-difficulty">
+          <button type="button" class="size-option" data-diff="easy">😴 EASY</button>
+          <button type="button" class="size-option active" data-diff="normal">😎 NORMAL</button>
+          <button type="button" class="size-option" data-diff="hard">🔥 HARD</button>
+        </div>
+      </div>
+
+      <div class="size-select">
+        <label>試合時間</label>
+        <div class="size-options" id="match-duration">
+          <button type="button" class="size-option" data-dur="120">2分</button>
+          <button type="button" class="size-option active" data-dur="300">5分</button>
+          <button type="button" class="size-option" data-dur="600">10分</button>
         </div>
       </div>
 
@@ -186,14 +206,22 @@
     <div class="sensitivity-ctrl" id="sensitivity-ctrl">
       <div class="sens-row">
         <label>感度</label>
-        <input type="range" id="sens-slider" min="8" max="35" step="1" value="18" />
+        <input type="range" id="sens-slider" min="8" max="40" step="1" value="18" />
         <span id="sens-val">18°</span>
+      </div>
+      <div class="sens-row">
+        <label>カーブ</label>
+        <input type="range" id="sens-curve" min="100" max="200" step="5" value="145" />
+        <span id="sens-curve-val">1.45</span>
       </div>
       <div class="sens-row">
         <label class="invert-lbl"><input type="checkbox" id="sens-invert" /> ステア反転</label>
       </div>
       <div class="sens-row">
         <label class="invert-lbl"><input type="checkbox" id="sens-autoboost" /> 前傾でブースト</label>
+      </div>
+      <div class="sens-row">
+        <button type="button" id="sens-recal" class="btn btn-ghost btn-mini-wide">🧭 再キャリブレ</button>
       </div>
     </div>
 
@@ -202,6 +230,7 @@
       <div class="finish-card">
         <h2 id="finish-title">FULL TIME!</h2>
         <div id="finish-score" class="finish-score">0 - 0</div>
+        <div id="finish-stats" class="finish-stats"></div>
         <button class="btn btn-primary" id="btn-back-lobby">🏠 戻る</button>
       </div>
     </div>

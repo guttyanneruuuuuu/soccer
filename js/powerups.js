@@ -32,20 +32,49 @@ const PowerUps = {
 
   reset() {
     for (const b of this.boxes) {
-      this.scene.remove(b.mesh);
-      b.mesh.geometry.dispose();
-      b.mesh.material.dispose();
+      this._disposeBox(b);
     }
     this.boxes = [];
     this.spawnTimer = 6;
+  },
+
+  // Group の子 Mesh を再帰的に dispose する (THREE.Group には .geometry/.material が無いためのバグ対策)
+  _disposeBox(b) {
+    if (!b || !b.mesh) return;
+    if (this.scene) this.scene.remove(b.mesh);
+    b.mesh.traverse((obj) => {
+      if (obj.isMesh || obj.isSprite) {
+        if (obj.geometry && obj.geometry.dispose) {
+          try { obj.geometry.dispose(); } catch (_) {}
+        }
+        if (obj.material) {
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          for (const m of mats) {
+            if (m && m.map && m.map.dispose) {
+              try { m.map.dispose(); } catch (_) {}
+            }
+            if (m && m.dispose) {
+              try { m.dispose(); } catch (_) {}
+            }
+          }
+        }
+      }
+    });
   },
 
   update(dt) {
     if (!this.enabled || !this.scene) return;
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0 && this.boxes.length < 3) {
-      this._spawnBox();
+      const box = this._spawnBox();
       this.spawnTimer = this.spawnInterval + Math.random() * 6;
+      // クライアントへスポーン通知 (ホストのみ)
+      if (Net.peer && Net.isHost && box) {
+        Net._broadcast({
+          type: 'powerupSpawn',
+          id: box.id, kind: box.kind, x: box.x, z: box.z, baseY: box.baseY, phase: box.phase,
+        });
+      }
     }
     // ボックス回転＆浮遊
     const t = performance.now() / 600;
@@ -65,25 +94,47 @@ const PowerUps = {
         const r = (CarPhys.RADIUS + 2.2);
         if (d2 < r * r) {
           this._collect(car, b);
+          const removedId = b.id;
           this._removeBox(i);
           // ネット同期 (ホスト)
           if (Net.peer && Net.isHost) {
-            Net._broadcast({ type: 'powerupTaken', carId: car.id, kind: b.kind });
+            Net._broadcast({ type: 'powerupTaken', carId: car.id, kind: b.kind, boxId: removedId });
           }
         }
       }
     }
   },
 
+  // クライアント用: ホスト由来のボックススポーン適用
+  applyRemoteSpawn(data) {
+    if (Net.isHost || !this.scene) return;
+    // 既に同 id があれば無視
+    if (this.boxes.find(b => b.id === data.id)) return;
+    this._buildBox(data.kind, data.x, data.z, data.baseY, data.phase, data.id);
+  },
+
+  applyRemoteTake(boxId) {
+    if (Net.isHost) return;
+    const idx = this.boxes.findIndex(b => b.id === boxId);
+    if (idx >= 0) this._removeBox(idx);
+  },
+
   _spawnBox() {
-    if (!this.scene) return;
+    if (!this.scene) return null;
     const kind = this.TYPES[Math.floor(Math.random() * this.TYPES.length)];
-    const meta = this.META[kind];
     // ランダム位置 (中央寄り・ペナルティエリア外)
     const margin = 14;
     const x = (Math.random() - 0.5) * (Arena.W - margin * 2);
     const z = (Math.random() - 0.5) * (Arena.L * 0.6);
     const baseY = 3.5;
+    const phase = Math.random() * Math.PI * 2;
+    const id = 'pu_' + Math.random().toString(36).slice(2, 9);
+    return this._buildBox(kind, x, z, baseY, phase, id);
+  },
+
+  _buildBox(kind, x, z, baseY, phase, id) {
+    const meta = this.META[kind];
+    if (!meta) return null;
     // ボックスメッシュ: 透明な多面体 + アイコン
     const group = new THREE.Group();
     const boxGeo = new THREE.OctahedronGeometry(2.2, 0);
@@ -108,20 +159,21 @@ const PowerUps = {
     const tex = new THREE.CanvasTexture(c);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
     sprite.scale.set(3.5, 3.5, 1);
-    sprite.position.set(0, 0, 0);
     group.add(sprite);
 
     group.position.set(x, baseY, z);
     this.scene.add(group);
-    this.boxes.push({
-      kind, x, z, baseY, phase: Math.random() * Math.PI * 2, mesh: group,
-    });
+    const obj = {
+      id, kind, x, z, baseY, phase, mesh: group,
+    };
+    this.boxes.push(obj);
+    return obj;
   },
 
   _removeBox(idx) {
     const b = this.boxes[idx];
     if (!b) return;
-    this.scene.remove(b.mesh);
+    this._disposeBox(b);
     this.boxes.splice(idx, 1);
   },
 

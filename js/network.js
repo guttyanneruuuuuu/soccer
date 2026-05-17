@@ -261,6 +261,14 @@ const Net = {
         this._emit('powerupTaken', data);
         break;
       }
+      case 'powerupSpawn': {
+        this._emit('powerupSpawn', data);
+        break;
+      }
+      case 'kickoffReset': {
+        this._emit('kickoffReset');
+        break;
+      }
     }
   },
 

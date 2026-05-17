@@ -420,12 +420,13 @@ input { font: inherit; }
   top: 56px;
   left: 50%;
   transform: translateX(-50%);
-  width: 140px;
-  height: 8px;
+  width: 160px;
+  height: 10px;
   background: rgba(0,0,0,0.55);
   border-radius: 5px;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
 }
 .gyro-indicator::before {
   content: '';
@@ -433,21 +434,38 @@ input { font: inherit; }
   left: 50%;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: rgba(255,255,255,0.4);
+  width: 2px;
+  background: rgba(255,255,255,0.55);
   transform: translateX(-50%);
+}
+/* デッドゾーン表示 (中央のうっすら帯) */
+.gyro-indicator::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  margin-left: -7px;
+  background: rgba(255,255,255,0.07);
+  pointer-events: none;
 }
 .gyro-arrow {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
   border-radius: 50%;
-  background: #4fc3f7;
-  box-shadow: 0 0 8px #4fc3f7;
-  transition: left 0.05s linear;
+  background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+  box-shadow: 0 0 12px #4fc3f7, inset 0 -2px 4px rgba(0,0,0,0.3);
+  transition: left 0.04s linear, background 0.15s;
+  z-index: 2;
+}
+.gyro-arrow.brake {
+  background: linear-gradient(135deg, #ff5252, #d32f2f);
+  box-shadow: 0 0 12px #ff5252, inset 0 -2px 4px rgba(0,0,0,0.3);
 }
 
 /* ゴール演出 */
@@ -716,8 +734,19 @@ input { font: inherit; }
   align-items: center;
   gap: 8px;
 }
-#sens-slider { flex: 1; }
+#sens-slider, #sens-curve { flex: 1; }
 .invert-lbl { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.btn-mini-wide {
+  width: 100%;
+  padding: 7px 10px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.btn-mini-wide:active { background: rgba(255,255,255,0.2); }
 
 .finish-overlay {
   position: absolute;
@@ -745,8 +774,62 @@ input { font: inherit; }
 .finish-score {
   font-size: 48px;
   font-weight: 900;
-  margin: 10px 0 22px;
+  margin: 10px 0 12px;
   color: #ffa726;
+}
+
+/* ゲーム終了画面の統計 */
+.finish-stats {
+  max-height: 38vh;
+  overflow-y: auto;
+  margin: 8px 0 18px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  font-size: 13px;
+  text-align: left;
+}
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+.stat-name {
+  flex: 1;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat-cell {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.07);
+  min-width: 38px;
+  text-align: center;
+}
+.stat-team-blue .stat-name { color: #7ec8f7; }
+.stat-team-orange .stat-name { color: #ffa18a; }
+
+/* ゴール時のスコアラー名 */
+.goal-scorer {
+  display: block;
+  font-size: 0.45em;
+  margin-top: 6px;
+  letter-spacing: 2px;
+  opacity: 0.9;
+  font-weight: 700;
 }
 
 /* カウントダウン */
