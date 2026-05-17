@@ -30,15 +30,15 @@ const Input = {
   _fallbackLandscapeSign: 1,
   _safeStorage: null,
 
-  // 設定値
-  sensitivity: 18,   // 左右ステアの感度 (度)
-  deadzone: 1.5,
+  // 設定値 (操作性改善後)
+  sensitivity: 14,   // 左右ステアの感度 (度) - 18 → 14 (より敏感)
+  deadzone: 1.2,     // デッドゾーン縮小 (1.5 → 1.2)
   invert: false,
-  pitchSensitivity: 22,    // ピッチ用の感度 (度)
-  pitchDeadzone: 4,
-  brakeThreshold: 0.30,    // |pitch| > 0.30 (後傾) でブレーキ
+  pitchSensitivity: 18,    // ピッチ用の感度 (度) - 22 → 18
+  pitchDeadzone: 3.5,      // 4 → 3.5
+  brakeThreshold: 0.32,    // |pitch| > 0.32 (後傾) でブレーキ
   boostThreshold: 0.45,    // 前傾 強で自動ブースト (オプション)
-  autoBoost: false,        // 前傾でブーストするか (デフォルトOFF: ブースト要らない場合多い)
+  autoBoost: false,        // 前傾でブーストするか (デフォルトOFF)
 
   _keys: {},
 
@@ -261,11 +261,11 @@ const Input = {
     const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.20);
     const ptarget = Utils.clamp(pcurved, -1, 1);
 
-    // ローパスフィルタ
+    // ローパスフィルタ (応答性アップ: 18→28, 上限0.65→0.85)
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
-    const alpha = Utils.clamp(dt * 18, 0.25, 0.65);
+    const alpha = Utils.clamp(dt * 28, 0.35, 0.85);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
     this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha);
 

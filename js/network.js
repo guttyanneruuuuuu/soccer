@@ -257,6 +257,10 @@ const Net = {
         this._emit('chat', data.from, data.msg);
         break;
       }
+      case 'powerupTaken': {
+        this._emit('powerupTaken', data);
+        break;
+      }
     }
   },
 
