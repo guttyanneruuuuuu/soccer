@@ -1,34 +1,46 @@
-// ============= 入力管理 (ジャイロ + タッチ + キーボード) =============
-// racegameのジャイロ実装をベースに、サッカーゲーム用に再構成
+// ============= 入力管理 (ジャイロのみ + JUMP ボタンのみ) =============
+// racegame のジャイロ実装をベースに、サッカーゲーム用に再構成:
+// - 左右ステアリング: ジャイロの傾き (gamma / beta) を自動キャリブレーション付きで使用
+// - アクセル: 自動 ON (input.accel = true 固定)
+// - ブレーキ/バック: 端末を奥(手前)に傾けるとピッチで発動 - ジャイロのみで操作!
+// - ブースト: 端末を強めに前傾するか、画面長押し (オプション)
+// - ジャンプ: 画面のジャンプボタン (押した瞬間のみ true)
 const Input = {
-  steer: 0,
-  accel: false,
-  brake: false,
-  boost: false,
-  jump: false,           // 1フレームだけ立つトリガー
+  // 出力
+  steer: 0,       // -1 .. 1 (ジャイロ左右)
+  pitch: 0,       // -1 .. 1 (ジャイロ前後傾)
+  accel: true,    // 自動 ON
+  brake: false,   // ピッチ後傾 (端末を起こす)
+  boost: false,   // ピッチ前傾 (端末を前に倒す) で発動
+  jump: false,    // 1フレームだけ立つトリガー
   jumpHeld: false,
-  drift: false,
 
   gyroEnabled: false,
   gyroCalibrated: false,
-  gyroBase: 0,
+  gyroBase: 0,      // ステアリング(横軸)基準
+  pitchBase: 0,     // ピッチ(縦軸)基準
   gyroRaw: 0,
+  pitchRaw: 0,
   gyroLastSampleTime: 0,
   gyroSamples: [],
+  pitchSamples: [],
   _smoothed: 0,
+  _pitchSmoothed: 0,
   _gyroOrientHandler: null,
   _fallbackLandscapeSign: 1,
   _safeStorage: null,
 
-  // ジャイロ感度
-  sensitivity: 18,
+  // 設定値
+  sensitivity: 18,   // 左右ステアの感度 (度)
   deadzone: 1.5,
   invert: false,
+  pitchSensitivity: 22,    // ピッチ用の感度 (度)
+  pitchDeadzone: 4,
+  brakeThreshold: 0.30,    // |pitch| > 0.30 (後傾) でブレーキ
+  boostThreshold: 0.45,    // 前傾 強で自動ブースト (オプション)
+  autoBoost: false,        // 前傾でブーストするか (デフォルトOFF: ブースト要らない場合多い)
 
   _keys: {},
-  _keySteer: 0,
-  _touchSteer: 0,
-  _touchSteerActive: false,
 
   init() {
     this._safeStorage = this._getStorage();
@@ -36,6 +48,8 @@ const Input = {
     if (!isNaN(saved) && saved > 5 && saved < 60) this.sensitivity = saved;
     const invSaved = this._storageGet('soccer-invert');
     if (invSaved === '1') this.invert = true;
+    const ab = this._storageGet('soccer-autoboost');
+    if (ab === '1') this.autoBoost = true;
 
     this._bindKeys();
     this._bindTouch();
@@ -52,17 +66,14 @@ const Input = {
   },
 
   _bindKeys() {
+    // PC 用キーボード (デバッグ・PC ユーザー向け)
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
       this._keys[k] = true;
       this._updateFromKeys();
-      if (k === ' ' || k === 'j') {
-        this.jump = true;
-        this.jumpHeld = true;
-      }
+      if (k === ' ' || k === 'j') { this.jump = true; this.jumpHeld = true; }
       if (k === 'shift') this.boost = true;
-      if (k === 'x' || k === 'k') this.drift = true;
     });
     window.addEventListener('keyup', (e) => {
       const k = e.key.toLowerCase();
@@ -70,48 +81,31 @@ const Input = {
       this._updateFromKeys();
       if (k === ' ' || k === 'j') this.jumpHeld = false;
       if (k === 'shift') this.boost = false;
-      if (k === 'x' || k === 'k') this.drift = false;
     });
   },
 
   _updateFromKeys() {
-    const keys = this._keys;
-    if (!this.gyroEnabled && !this._touchSteerActive) {
-      this._keySteer = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
-    }
-    this.accel = !!(keys['arrowup'] || keys['w']);
-    this.brake = !!(keys['arrowdown'] || keys['s']);
+    // ジャイロが無効なときに限り、キーボードでステア + ブレーキできる
+    if (this.gyroEnabled) return;
+    const k = this._keys;
+    const lr = (k['arrowright'] || k['d'] ? 1 : 0) + (k['arrowleft'] || k['a'] ? -1 : 0);
+    this._keySteer = lr;
+    this.brake = !!(k['arrowdown'] || k['s']);
+    // accel は常に ON
   },
 
   _bindTouch() {
-    const setHoldBtn = (id, prop, cls = 'pressed') => {
-      const btn = document.getElementById(id);
-      if (!btn) return;
-      const on = (e) => { e.preventDefault(); this[prop] = true; btn.classList.add(cls); };
-      const off = (e) => { if (e) e.preventDefault(); this[prop] = false; btn.classList.remove(cls); };
-      btn.addEventListener('touchstart', on, { passive: false });
-      btn.addEventListener('touchend', off, { passive: false });
-      btn.addEventListener('touchcancel', off, { passive: false });
-      btn.addEventListener('mousedown', on);
-      btn.addEventListener('mouseup', off);
-      btn.addEventListener('mouseleave', off);
-    };
-    setHoldBtn('ctrl-accel', 'accel');
-    setHoldBtn('ctrl-brake', 'brake');
-    setHoldBtn('ctrl-boost', 'boost');
-    setHoldBtn('ctrl-drift', 'drift');
-
-    // ジャンプ: 押された瞬間にフラグを立てる
+    // ジャンプボタンのみ
     const jumpBtn = document.getElementById('ctrl-jump');
     if (jumpBtn) {
       const on = (e) => {
-        e.preventDefault();
+        if (e && e.preventDefault) e.preventDefault();
         this.jump = true;
         this.jumpHeld = true;
         jumpBtn.classList.add('pressed');
       };
       const off = (e) => {
-        if (e) e.preventDefault();
+        if (e && e.preventDefault) e.preventDefault();
         this.jumpHeld = false;
         jumpBtn.classList.remove('pressed');
       };
@@ -122,15 +116,38 @@ const Input = {
       jumpBtn.addEventListener('mouseup', off);
       jumpBtn.addEventListener('mouseleave', off);
     }
+
+    // ブーストボタン (オプション)
+    const boostBtn = document.getElementById('ctrl-boost');
+    if (boostBtn) {
+      const on = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        this.boost = true;
+        boostBtn.classList.add('pressed');
+      };
+      const off = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        this.boost = false;
+        boostBtn.classList.remove('pressed');
+      };
+      boostBtn.addEventListener('touchstart', on, { passive: false });
+      boostBtn.addEventListener('touchend', off, { passive: false });
+      boostBtn.addEventListener('touchcancel', off, { passive: false });
+      boostBtn.addEventListener('mousedown', on);
+      boostBtn.addEventListener('mouseup', off);
+      boostBtn.addEventListener('mouseleave', off);
+    }
   },
 
   update(dt) {
-    if (this.gyroEnabled) return;
-    const target = this._touchSteerActive ? this._touchSteer : this._keySteer;
-    const response = target === 0 ? 22 : 18;
-    const alpha = Utils.clamp(dt * response, 0.28, 0.85);
-    this.steer = Utils.lerp(this.steer, target, alpha);
-    if (Math.abs(this.steer) < 0.001 && target === 0) this.steer = 0;
+    // ジャイロが無効なら キーボード steer をスムージング
+    if (!this.gyroEnabled) {
+      const target = this._keySteer || 0;
+      const response = target === 0 ? 22 : 18;
+      const alpha = Utils.clamp(dt * response, 0.28, 0.85);
+      this.steer = Utils.lerp(this.steer, target, alpha);
+      if (Math.abs(this.steer) < 0.001 && target === 0) this.steer = 0;
+    }
   },
 
   consumeJump() {
@@ -172,54 +189,95 @@ const Input = {
     const fallbackLandscape = normAngle !== 90 && normAngle !== 270 &&
       ((orientationType && orientationType.startsWith('landscape')) || window.innerWidth > window.innerHeight);
 
-    let val;
+    // ステア用とピッチ用の値を画面向きに応じて選ぶ
+    let steerVal, pitchVal;
     if (normAngle === 90) {
-      val = b;
+      // 横向き(landscape primary): 横軸=beta, 縦軸=gamma
+      steerVal = b;
+      pitchVal = -g;
     } else if (normAngle === 270) {
-      val = -b;
+      steerVal = -b;
+      pitchVal = g;
     } else if (fallbackLandscape) {
       if (orientationType.includes('secondary')) this._fallbackLandscapeSign = -1;
       else if (orientationType.includes('primary')) this._fallbackLandscapeSign = 1;
       else if (Math.abs(g) > 8) this._fallbackLandscapeSign = g >= 0 ? 1 : -1;
-      val = b * this._fallbackLandscapeSign;
+      steerVal = b * this._fallbackLandscapeSign;
+      pitchVal = -g * this._fallbackLandscapeSign;
     } else {
-      val = g;
+      // 縦持ち: 横軸=gamma, 縦軸=beta
+      steerVal = g;
+      pitchVal = b;
     }
 
-    this.gyroRaw = val;
+    this.gyroRaw = steerVal;
+    this.pitchRaw = pitchVal;
 
+    // 自動キャリブレーション (両軸)
     if (!this.gyroCalibrated) {
-      this.gyroSamples.push(val);
+      this.gyroSamples.push(steerVal);
+      this.pitchSamples.push(pitchVal);
       if (this.gyroSamples.length >= 20) {
-        let avg = 0;
-        for (const s of this.gyroSamples) avg += s;
+        let avg = 0, pavg = 0;
+        for (let i = 0; i < this.gyroSamples.length; i++) {
+          avg += this.gyroSamples[i];
+          pavg += this.pitchSamples[i];
+        }
         this.gyroBase = avg / this.gyroSamples.length;
+        this.pitchBase = pavg / this.pitchSamples.length;
         this.gyroCalibrated = true;
         this.gyroSamples = [];
+        this.pitchSamples = [];
       } else {
-        this.gyroBase = val;
+        this.gyroBase = steerVal;
+        this.pitchBase = pitchVal;
       }
     }
 
-    let diff = val - this.gyroBase;
+    // ===== ステアリング =====
+    let diff = steerVal - this.gyroBase;
+    // 微弱ドリフト追従
     if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 2.5) {
-      this.gyroBase = Utils.lerp(this.gyroBase, val, 0.015);
-      diff = val - this.gyroBase;
+      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.012);
+      diff = steerVal - this.gyroBase;
     }
     if (Math.abs(diff) < this.deadzone) diff = 0;
     else diff -= Math.sign(diff) * this.deadzone;
-
     const norm = Utils.clamp(diff / this.sensitivity, -1.2, 1.2);
     const curved = Math.sign(norm) * Math.pow(Math.min(1, Math.abs(norm)), 1.30);
     let target = -Utils.clamp(curved, -1, 1);
     if (this.invert) target = -target;
 
+    // ===== ピッチ (ブレーキ/ブースト判定) =====
+    let pdiff = pitchVal - this.pitchBase;
+    // ピッチ基準はゆっくり追従するがステアより遅め
+    if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.5) {
+      this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.006);
+      pdiff = pitchVal - this.pitchBase;
+    }
+    if (Math.abs(pdiff) < this.pitchDeadzone) pdiff = 0;
+    else pdiff -= Math.sign(pdiff) * this.pitchDeadzone;
+    const pnorm = Utils.clamp(pdiff / this.pitchSensitivity, -1.2, 1.2);
+    const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.20);
+    const ptarget = Utils.clamp(pcurved, -1, 1);
+
+    // ローパスフィルタ
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
     const alpha = Utils.clamp(dt * 18, 0.25, 0.65);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
+    this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha);
+
     this.steer = this._smoothed;
+    this.pitch = this._pitchSmoothed;
+
+    // ピッチ後傾 (端末を起こす方向: pitch > 0) でブレーキ
+    this.brake = (this.pitch > this.brakeThreshold);
+    // ピッチ前傾 でオプションブースト (デフォルト OFF。ジャンプボタンで集中。ブーストボタンが優先)
+    if (this.autoBoost && !this._keys['shift']) {
+      this.boost = (this.pitch < -this.boostThreshold);
+    }
   },
 
   recalibrate() { this._resetGyroTracking(); },
@@ -227,8 +285,10 @@ const Input = {
   _resetGyroTracking() {
     this.gyroCalibrated = false;
     this.gyroSamples = [];
+    this.pitchSamples = [];
     this.gyroLastSampleTime = 0;
     this._smoothed = 0;
+    this._pitchSmoothed = 0;
     this._fallbackLandscapeSign = 1;
   },
 
@@ -240,6 +300,11 @@ const Input = {
   setInvert(v) {
     this.invert = !!v;
     this._storageSet('soccer-invert', this.invert ? '1' : '0');
+  },
+
+  setAutoBoost(v) {
+    this.autoBoost = !!v;
+    this._storageSet('soccer-autoboost', this.autoBoost ? '1' : '0');
   },
 
   _getStorage() {

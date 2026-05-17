@@ -4,6 +4,7 @@ const App = {
   myInfo: { name: 'Player', color: '#E53935', team: 'blue' },
 
   init() {
+    SFX.init();
     Input.init();
     Game.init();
 
@@ -57,7 +58,7 @@ const App = {
     document.getElementById('btn-copy-code').addEventListener('click', () => this._copyCode());
     document.getElementById('btn-back-lobby').addEventListener('click', () => this._backFromGame());
 
-    // ロビー: チーム選択切替（ロビー内）
+    // ロビー: チーム切替
     document.getElementById('btn-team-blue').addEventListener('click', () => this._setMyTeam('blue'));
     document.getElementById('btn-team-orange').addEventListener('click', () => this._setMyTeam('orange'));
 
@@ -65,7 +66,12 @@ const App = {
     document.getElementById('btn-enable-gyro').addEventListener('click', async () => {
       const ok = await Input.enableGyro();
       document.getElementById('gyro-permission').classList.remove('show');
-      if (ok) showToast('🎮 ジャイロ有効！', 1500);
+      if (ok) {
+        showToast('🎮 ジャイロ有効！スマホを横向きに！', 1800);
+        this._tryLockLandscape();
+      } else {
+        showToast('ジャイロ許可されませんでした', 1800);
+      }
     });
     document.getElementById('btn-skip-gyro').addEventListener('click', () => {
       document.getElementById('gyro-permission').classList.remove('show');
@@ -93,6 +99,20 @@ const App = {
       sensInvert.checked = Input.invert;
       sensInvert.addEventListener('change', () => Input.setInvert(sensInvert.checked));
     }
+    const sensAutoBoost = document.getElementById('sens-autoboost');
+    if (sensAutoBoost) {
+      sensAutoBoost.checked = Input.autoBoost;
+      sensAutoBoost.addEventListener('change', () => Input.setAutoBoost(sensAutoBoost.checked));
+    }
+    // ポーズ
+    const pauseBtn = document.getElementById('btn-pause');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('click', () => {
+        if (confirm('試合を抜けますか？')) {
+          this._backFromGame(true);
+        }
+      });
+    }
 
     // ネット
     Net.on('roomReady', (code) => {
@@ -119,18 +139,34 @@ const App = {
       Game.startMatch(opts);
     });
 
-    // 初期画面
     this._show('title');
-    // ジャイロ許可: iOSの場合は表示
+
+    // デバッグ用ショートカット: ?autosolo=1 でタイトルをスキップしてソロ開始
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('autosolo') === '1') {
+        setTimeout(() => this._onSolo(), 400);
+      }
+    } catch (_) {}
+
+    // ジャイロ自動有効化 (Android系)
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
-      // 表示せず、最初の操作で表示
+      // iOSは明示許可必須なので何もしない
     } else {
-      // 自動的に有効化を試みる
       Input.enableGyro().then(ok => {
         if (ok) console.log('gyro auto-enabled');
       }).catch(() => {});
     }
+  },
+
+  _tryLockLandscape() {
+    // 一部Android端末で横画面ロックを試みる
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+    } catch (_) {}
   },
 
   _show(name) {
@@ -150,13 +186,16 @@ const App = {
   _maybeAskGyro() {
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
-      document.getElementById('gyro-permission').classList.add('show');
+      if (!Input.gyroEnabled) {
+        document.getElementById('gyro-permission').classList.add('show');
+      }
     }
   },
 
   async _onCreateRoom() {
     this._readMyInfo();
     this._maybeAskGyro();
+    this._tryLockLandscape();
     try {
       await Net.createRoom({ name: this.myInfo.name, color: this.myInfo.color, team: this.myInfo.team });
     } catch (e) {
@@ -172,6 +211,7 @@ const App = {
       return;
     }
     this._maybeAskGyro();
+    this._tryLockLandscape();
     try {
       await Net.joinRoom(code, { name: this.myInfo.name, color: this.myInfo.color, team: this.myInfo.team });
     } catch (e) {
@@ -182,16 +222,29 @@ const App = {
   _onSolo() {
     this._readMyInfo();
     this._maybeAskGyro();
-    // ソロ: 自分 + Bot (matchSize-1 仲間 + matchSize 相手)
+    this._tryLockLandscape();
     const players = [{ id: 'me', name: this.myInfo.name, color: this.myInfo.color, team: this.myInfo.team, isLocal: true }];
     Game.myInfo = { id: 'me', name: this.myInfo.name, color: this.myInfo.color, team: this.myInfo.team };
     const oppositeTeam = this.myInfo.team === 'blue' ? 'orange' : 'blue';
     const size = Game.matchSize;
+    const myTeamColor = this.myInfo.color;
+    const teamMatePalette = ['#26C6DA', '#66BB6A', '#AB47BC', '#FF7043', '#FFA000', '#5C6BC0'];
+    const enemyPalette = ['#EF5350', '#FFA726', '#7E57C2', '#42A5F5', '#26A69A', '#EC407A'];
     for (let i = 1; i < size; i++) {
-      players.push({ id: 'bot-blue-' + i, name: 'BOT' + i, color: '#888', team: this.myInfo.team });
+      players.push({
+        id: 'bot-blue-' + i,
+        name: 'BOT' + i,
+        color: teamMatePalette[i - 1] || '#888',
+        team: this.myInfo.team,
+      });
     }
     for (let i = 0; i < size; i++) {
-      players.push({ id: 'bot-org-' + i, name: 'BOT' + (i + 1), color: '#aaa', team: oppositeTeam });
+      players.push({
+        id: 'bot-org-' + i,
+        name: 'CPU' + (i + 1),
+        color: enemyPalette[i] || '#aaa',
+        team: oppositeTeam,
+      });
     }
     this._show('game');
     Game.startMatch({ players, duration: 300 });
@@ -224,12 +277,10 @@ const App = {
     }
     document.getElementById('player-count').textContent = `${players.length} / ${Net.MAX_PLAYERS}`;
 
-    // ホスト用 開始ボタン
     const startBtn = document.getElementById('btn-start-match');
     if (Net.isHost) startBtn.style.display = '';
     else startBtn.style.display = 'none';
 
-    // チーム情報を更新
     const me = Net.players.get(Net.myId);
     if (me) {
       this.myInfo.team = me.team;
@@ -253,10 +304,25 @@ const App = {
 
   _hostStart() {
     if (!Net.isHost) return;
-    const players = Net._playerList().map(p => ({
+    const playerList = Net._playerList();
+    // バランスチェック: チーム差>1 ならエラー
+    let blue = 0, orange = 0;
+    for (const p of playerList) {
+      if (p.team === 'blue') blue++;
+      else if (p.team === 'orange') orange++;
+    }
+    if (Math.abs(blue - orange) > 1) {
+      showToast(`⚖️ チームバランスが悪いです (${blue} vs ${orange})`, 2200);
+    }
+    // 上限チェック
+    const sizeLimit = Math.max(blue, orange);
+    if (sizeLimit > 4) {
+      showToast('1チーム最大4人までです', 2200);
+      return;
+    }
+    const players = playerList.map(p => ({
       id: p.id, name: p.name, color: p.color, team: p.team || 'blue',
     }));
-    // 自分のIDをローカル扱いに
     Game.myInfo.id = Net.myId;
     Net.startGame({ players, duration: 300 });
   },
@@ -275,11 +341,17 @@ const App = {
     } catch (_) {}
   },
 
-  _backFromGame() {
+  _backFromGame(forceLeave = false) {
     document.getElementById('finish-overlay').classList.remove('show');
     Game.running = false;
-    if (Net.peer) this._show('lobby');
-    else this._show('title');
+    if (forceLeave && Net.peer) {
+      Net.leave();
+      this._show('title');
+    } else if (Net.peer) {
+      this._show('lobby');
+    } else {
+      this._show('title');
+    }
   },
 };
 

@@ -8,6 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Gyro Soccer Arena - スマホでロケットリーグ風サッカー</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -34,6 +35,8 @@
           <div class="car-option" data-color="#43A047" style="--c:#43A047"></div>
           <div class="car-option" data-color="#8E24AA" style="--c:#8E24AA"></div>
           <div class="car-option" data-color="#FB8C00" style="--c:#FB8C00"></div>
+          <div class="car-option" data-color="#FFFFFF" style="--c:#FFFFFF"></div>
+          <div class="car-option" data-color="#212121" style="--c:#212121"></div>
         </div>
       </div>
 
@@ -46,7 +49,7 @@
       </div>
 
       <div class="size-select">
-        <label>マッチサイズ（ソロBot用）</label>
+        <label>マッチサイズ（ソロBot / オンライン最大）</label>
         <div class="size-options" id="size-options">
           <button type="button" class="size-option" data-size="1">1v1</button>
           <button type="button" class="size-option" data-size="2">2v2</button>
@@ -60,7 +63,14 @@
         <button class="btn btn-secondary" id="btn-join-room">🔑 部屋に入る</button>
         <button class="btn btn-ghost" id="btn-solo">🤖 Botと練習</button>
       </div>
-      <p class="hint">スマホ横向き + ジャイロでハンドル操作！<br>友達と最大4v4でオンライン対戦できるよ。</p>
+      <p class="hint">
+        📱 <strong>横向き</strong>+<strong>ジャイロ</strong>で操作！<br>
+        左右の傾き=ハンドル / 後ろに傾けるとブレーキ / 唯一のボタン=ジャンプ<br>
+        友達と最大 4v4（8人）でオンライン対戦！
+      </p>
+      <p class="orientation-warn" id="orientation-warn">
+        ⚠️ スマホを <strong>横向き</strong>にしてプレイしてね！
+      </p>
     </div>
   </div>
 
@@ -111,37 +121,59 @@
         <div class="hud-time" id="hud-time">05:00</div>
         <div class="score-orange"><span id="hud-score-orange">0</span> 🟠</div>
       </div>
+
+      <!-- スピード (左下) -->
       <div class="hud-speed">
         <div class="speed-val" id="hud-speed">0</div>
         <div class="speed-unit">km/h</div>
       </div>
+
+      <!-- ブーストメーター (右下) -->
       <div class="boost-meter">
-        <div class="boost-label">BOOST <span id="boost-val">0</span>%</div>
-        <div class="boost-bar"><div class="boost-fill" id="boost-fill"></div></div>
+        <div class="boost-label"><span class="boost-icon">🔥</span> <span id="boost-val">0</span></div>
+        <div class="boost-ring">
+          <svg viewBox="0 0 80 80" width="80" height="80">
+            <circle cx="40" cy="40" r="34" stroke="rgba(0,0,0,0.6)" stroke-width="8" fill="none" />
+            <circle id="boost-ring-fill" cx="40" cy="40" r="34" stroke="#ff8800" stroke-width="8" fill="none"
+                    stroke-dasharray="213.6" stroke-dashoffset="143" stroke-linecap="round"
+                    transform="rotate(-90 40 40)" />
+          </svg>
+        </div>
       </div>
+
+      <!-- ジャイロインジケーター (右上) -->
+      <div class="gyro-indicator" id="gyro-indicator">
+        <div class="gyro-arrow" id="gyro-arrow"></div>
+      </div>
+
       <div id="goal-banner" class="goal-banner"></div>
+      <div id="brake-indicator" class="brake-indicator">🅑 BRAKE</div>
     </div>
 
-    <!-- タッチ操作 -->
-    <div class="touch-controls-left">
-      <button class="ctrl-btn ctrl-brake" id="ctrl-brake">◀ BRAKE</button>
-    </div>
-    <div class="touch-controls-right">
-      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥 BOOST</button>
+    <!-- タッチ操作: ジャンプボタンのみ (右下) + 隠しブーストボタン(オプション) -->
+    <div class="touch-controls">
       <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆ JUMP</button>
-      <button class="ctrl-btn ctrl-accel" id="ctrl-accel">ACCEL ▶</button>
+      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥 BOOST</button>
     </div>
 
-    <!-- 設定ボタン -->
+    <!-- 設定 -->
     <div class="settings-stack">
       <button class="btn-icon" id="btn-recalibrate" title="ジャイロ再設定">⟲</button>
       <button class="btn-icon" id="btn-toggle-sens" title="感度">⚙</button>
+      <button class="btn-icon" id="btn-pause" title="ポーズ / 退出">✕</button>
     </div>
     <div class="sensitivity-ctrl" id="sensitivity-ctrl">
-      <label>感度</label>
-      <input type="range" id="sens-slider" min="8" max="35" step="1" value="18" />
-      <span id="sens-val">18°</span>
-      <label class="invert-lbl"><input type="checkbox" id="sens-invert" /> 反転</label>
+      <div class="sens-row">
+        <label>感度</label>
+        <input type="range" id="sens-slider" min="8" max="35" step="1" value="18" />
+        <span id="sens-val">18°</span>
+      </div>
+      <div class="sens-row">
+        <label class="invert-lbl"><input type="checkbox" id="sens-invert" /> ステア反転</label>
+      </div>
+      <div class="sens-row">
+        <label class="invert-lbl"><input type="checkbox" id="sens-autoboost" /> 前傾でブースト</label>
+      </div>
     </div>
 
     <!-- フィニッシュ -->
@@ -153,6 +185,9 @@
       </div>
     </div>
 
+    <!-- カウントダウン -->
+    <div id="countdown" class="countdown"></div>
+
     <div id="toast" class="toast"></div>
   </div>
 
@@ -160,10 +195,18 @@
   <div id="gyro-permission" class="gyro-perm">
     <div class="panel">
       <h2>🎮 ジャイロを有効にする</h2>
-      <p>スマホを傾けて操作するため、モーションセンサーへのアクセス許可が必要です。</p>
+      <p>スマホを傾けて車を操作するため、モーションセンサーへのアクセス許可が必要です。<br>
+         「許可する」を押した後、スマホを<strong>横向き</strong>にして遊んでね！</p>
       <button class="btn btn-primary" id="btn-enable-gyro">許可する</button>
-      <button class="btn btn-ghost" id="btn-skip-gyro">スキップ（タッチで操作）</button>
+      <button class="btn btn-ghost" id="btn-skip-gyro">スキップ（キーボード操作）</button>
     </div>
+  </div>
+
+  <!-- 縦持ち警告 -->
+  <div id="portrait-overlay" class="portrait-overlay">
+    <div class="portrait-icon">📱↻</div>
+    <h2>スマホを横向きにしてね</h2>
+    <p>ロケットリーグ風サッカーは横画面でプレイします</p>
   </div>
 
   <!-- ライブラリ -->
@@ -172,6 +215,7 @@
 
   <!-- ゲームスクリプト -->
   <script src="js/utils.js"></script>
+  <script src="js/sfx.js"></script>
   <script src="js/input.js"></script>
   <script src="js/arena.js"></script>
   <script src="js/car.js"></script>
