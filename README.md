@@ -63,6 +63,13 @@
 
 ---
 
+## 🌍 GitHub Pages
+
+- 公開 URL: **https://guttyanneruuuuuu.github.io/soccer/**
+- `main` または `master` ブランチへの push で自動デプロイされます（`.github/workflows/deploy-pages.yml`）。
+
+---
+
 ## 📐 アリーナ仕様
 
 | 項目 | サイズ |
