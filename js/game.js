@@ -634,16 +634,6 @@ const Game = {
           if (Math.abs(dot) > 12) {
             SFX.thud(Math.min(1, Math.abs(dot) / 30));
           }
-          // === デモリッション判定 ===
-          const spA = Math.sqrt(a.vx*a.vx + a.vy*a.vy + a.vz*a.vz);
-          const spB = Math.sqrt(b.vx*b.vx + b.vy*b.vy + b.vz*b.vz);
-          const isEnemy = a.team !== b.team;
-          const DEMO_SPEED = 56;
-          if (isEnemy && spA > DEMO_SPEED && spA > spB + 12) {
-            this._demolish(b, a);
-          } else if (isEnemy && spB > DEMO_SPEED && spB > spA + 12) {
-            this._demolish(a, b);
-          }
         }
       }
     }
