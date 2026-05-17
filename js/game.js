@@ -19,6 +19,8 @@ const Game = {
   matchEnded: false,
   goalAnimTimer: 0,
   kickoffCountdown: 0,
+  _goalResetPending: false,
+  _goalResetSafetyTimer: 0,
   _lastBoostPadCheck: 0,
 
   // ホストシム
@@ -122,6 +124,8 @@ const Game = {
     this.goalAnimTimer = 0;
     this.matchDuration = opts.duration || 300;
     this.kickoffCountdown = 3.0;
+    this._goalResetPending = false;
+    this._goalResetSafetyTimer = 0;
 
     // スポーン
     const blueList = players.filter(p => p.team === 'blue');
@@ -215,11 +219,20 @@ const Game = {
     // タイマー破損の保険
     if (!Number.isFinite(this.kickoffCountdown)) this.kickoffCountdown = 0;
     if (!Number.isFinite(this.goalAnimTimer)) this.goalAnimTimer = 0;
+    if (!Number.isFinite(this._goalResetSafetyTimer)) this._goalResetSafetyTimer = 0;
 
     // ゴール演出中
     if (this.goalAnimTimer > 0) {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
+        this.goalAnimTimer = 0;
+      }
+    }
+    if (this._goalResetPending) {
+      this._goalResetSafetyTimer = Math.max(0, this._goalResetSafetyTimer - dt);
+      if (this.goalAnimTimer <= 0 || this._goalResetSafetyTimer <= 0) {
+        this._goalResetPending = false;
+        this._goalResetSafetyTimer = 0;
         this.goalAnimTimer = 0;
         this._kickoffReset();
       }
@@ -574,6 +587,8 @@ const Game = {
 
   _onGoal(team) {
     this.goalAnimTimer = 1.2;
+    this._goalResetPending = true;
+    this._goalResetSafetyTimer = 3.0;
     this._goalSlowmoT = 1.2; // スローモーション時間
     this._goalScorerTeam = team;
     SFX.goal();
