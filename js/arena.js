@@ -8,7 +8,7 @@ const Arena = {
   SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
   W: 82 * ARENA_SCALE,            // 短辺(X) ハーフ幅 = 41
   L: 104 * ARENA_SCALE,           // 長辺(Z) ハーフ長 = 52
-  H: 42 * ARENA_SCALE,            // 天井までの高さ
+  H: 34 * ARENA_SCALE,            // 天井までの高さ(少し低くして展開を速く)
   GOAL_W: 26 * ARENA_SCALE,       // ゴール幅
   GOAL_H: 13 * ARENA_SCALE,       // ゴールの高さ
   GOAL_DEPTH: 8 * ARENA_SCALE,    // ゴール奥行き

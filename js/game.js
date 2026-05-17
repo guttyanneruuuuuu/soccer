@@ -212,22 +212,26 @@ const Game = {
   update(dt) {
     Input.update(dt);
 
-    // キックオフ前カウントダウン中は車もボールも動かさない
-    const kickoffActive = this.kickoffCountdown > 0;
-    if (kickoffActive) {
-      this.kickoffCountdown -= dt;
-    }
+    // タイマー破損の保険
+    if (!Number.isFinite(this.kickoffCountdown)) this.kickoffCountdown = 0;
+    if (!Number.isFinite(this.goalAnimTimer)) this.goalAnimTimer = 0;
 
     // ゴール演出中
     if (this.goalAnimTimer > 0) {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
+        this.goalAnimTimer = 0;
         this._kickoffReset();
       }
     }
+    // キックオフ前カウントダウン中は車もボールも動かさない
+    if (this.kickoffCountdown > 0) {
+      this.kickoffCountdown = Math.max(0, this.kickoffCountdown - dt);
+    }
+    const playLocked = this.kickoffCountdown > 0 || this.goalAnimTimer > 0;
 
     // タイマー
-    if (this.matchStarted && !this.matchEnded && this.goalAnimTimer <= 0 && !kickoffActive) {
+    if (this.matchStarted && !this.matchEnded && !playLocked) {
       this.matchTime += dt;
       const remain = Math.max(0, this.matchDuration - this.matchTime);
       document.getElementById('hud-time').textContent = Utils.formatTime(remain * 1000);
@@ -244,7 +248,7 @@ const Game = {
 
     // ===== ローカル車の入力組み立て =====
     let inputState = null;
-    if (this.localCar && !kickoffActive && this.goalAnimTimer <= 0) {
+    if (this.localCar && !playLocked) {
       inputState = {
         steer: Input.steer,
         accel: Input.accel,
@@ -269,7 +273,7 @@ const Game = {
       // ホスト: 他クライアントの車を彼らの入力で
       for (const [id, car] of this.cars) {
         if (car === this.localCar) continue;
-        if (kickoffActive || this.goalAnimTimer > 0) {
+        if (playLocked) {
           car.update(dt, null);
           continue;
         }
@@ -279,7 +283,7 @@ const Game = {
         if (inp.jump) inp.jump = false;
       }
       // ボール物理
-      if (!kickoffActive && this.goalAnimTimer <= 0) {
+      if (!playLocked) {
         this.ball.update(dt);
         // 衝突
         for (const car of this.cars.values()) {
@@ -332,7 +336,7 @@ const Game = {
       }});
     } else {
       // ソロ: 自分でボール・Bot
-      if (!kickoffActive && this.goalAnimTimer <= 0) {
+      if (!playLocked) {
         this.ball.update(dt);
         for (const car of this.cars.values()) {
           if (car !== this.localCar) {
@@ -346,7 +350,7 @@ const Game = {
         const g = this.ball.checkGoal();
         if (g === 1) { this.scoreBlue++; this._onGoal('blue'); }
         else if (g === -1) { this.scoreOrange++; this._onGoal('orange'); }
-      } else if (kickoffActive) {
+      } else if (playLocked) {
         for (const car of this.cars.values()) {
           if (car !== this.localCar) car.update(dt, null);
         }
@@ -370,7 +374,7 @@ const Game = {
 
     // パワーアップ更新 (ホストまたはソロのみがスポーン/判定)
     if (typeof PowerUps !== 'undefined' && (Net.isHost || !Net.peer)) {
-      if (!kickoffActive && this.goalAnimTimer <= 0) PowerUps.update(dt);
+      if (!playLocked) PowerUps.update(dt);
     }
     // 全車の有効パワー効果適用 (見た目はクライアントでもやりたい)
     if (typeof PowerUps !== 'undefined') {
@@ -639,6 +643,7 @@ const Game = {
 
   _kickoffReset() {
     this.ball.reset();
+    this.goalAnimTimer = 0;
     const blueList = Array.from(this.cars.values()).filter(c => c.team === 'blue');
     const orgList = Array.from(this.cars.values()).filter(c => c.team === 'orange');
     const resetTeam = (list, zSign) => {
@@ -653,6 +658,8 @@ const Game = {
         c.pitch = 0; c.roll = 0;
         c.onGround = true;
         c.jumpsUsed = 0;
+        c.lockTimer = 0;
+        c.ballHitCooldown = 0;
         c.respawnTimer = 0;
         c.mesh.visible = true;
         c.boost = Math.max(c.boost, CarPhys.BOOST_INITIAL);

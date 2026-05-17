@@ -6,18 +6,18 @@ const BallPhys = {
   GRAVITY: 14,            // 通常重力38 → ぐっと弱めて空中保持時間を伸ばす
   AIR_FRICTION: 0.06,     // 風船らしく空気抵抗ややあり
   GROUND_FRICTION: 0.5,
-  WALL_BOUNCE: 0.84,
-  FLOOR_BOUNCE: 0.68,
-  CEIL_BOUNCE: 0.62,
-  MAX_SPEED: 144,
+  WALL_BOUNCE: 0.93,
+  FLOOR_BOUNCE: 0.78,
+  CEIL_BOUNCE: 0.82,
+  MAX_SPEED: 168,
   // 車衝突時の反発係数 (1.0 以上で「むっちゃ飛ぶ」)
-  HIT_RESTITUTION: 1.25,
+  HIT_RESTITUTION: 1.38,
   // 車速度の何割を追加で乗せるか
-  HIT_VEL_TRANSFER: 0.58,
+  HIT_VEL_TRANSFER: 0.75,
   // 最低キック値 (ヒット感確保)
-  HIT_MIN_KICK: 11,
+  HIT_MIN_KICK: 14,
   // 衝突時に上方向に必ず加わる量
-  HIT_LIFT: 4.5,
+  HIT_LIFT: 5.5,
 };
 
 class Ball {
@@ -187,11 +187,11 @@ class Ball {
     const goalBack = Arena.L/2 + Arena.GOAL_DEPTH;
     if (this.z > goalBack - BallPhys.RADIUS) {
       this.z = goalBack - BallPhys.RADIUS;
-      if (this.vz > 0) this.vz = -this.vz * 0.35;
+      if (this.vz > 0) this.vz = -this.vz * 0.72;
     }
     if (this.z < -goalBack + BallPhys.RADIUS) {
       this.z = -goalBack + BallPhys.RADIUS;
-      if (this.vz < 0) this.vz = -this.vz * 0.35;
+      if (this.vz < 0) this.vz = -this.vz * 0.72;
     }
 
     // ===== コーナー壁 =====
