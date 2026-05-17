@@ -2,6 +2,7 @@
 const App = {
   screen: 'title',
   myInfo: { name: 'Player', color: '#E53935', team: 'blue' },
+  matchDuration: 300, // 秒
 
   init() {
     SFX.init();
@@ -46,6 +47,46 @@ const App = {
         Game.matchSize = parseInt(opt.dataset.size, 10);
       });
     });
+
+    // Bot 難易度
+    document.querySelectorAll('#bot-difficulty .size-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        document.querySelectorAll('#bot-difficulty .size-option').forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+        Game.botDifficulty = opt.dataset.diff;
+        try { localStorage.setItem('soccer-bot-diff', Game.botDifficulty); } catch (_) {}
+      });
+    });
+
+    // 試合時間
+    document.querySelectorAll('#match-duration .size-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        document.querySelectorAll('#match-duration .size-option').forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+        this.matchDuration = parseInt(opt.dataset.dur, 10);
+        try { localStorage.setItem('soccer-duration', String(this.matchDuration)); } catch (_) {}
+      });
+    });
+
+    // 保存された設定の復元
+    try {
+      const sd = localStorage.getItem('soccer-bot-diff');
+      if (sd) {
+        Game.botDifficulty = sd;
+        const btn = document.querySelector(`#bot-difficulty .size-option[data-diff="${sd}"]`);
+        if (btn) {
+          document.querySelectorAll('#bot-difficulty .size-option').forEach(o => o.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      }
+      const md = parseInt(localStorage.getItem('soccer-duration'), 10);
+      if (md && [120, 300, 600].includes(md)) {
+        this.matchDuration = md;
+        document.querySelectorAll('#match-duration .size-option').forEach(o => o.classList.remove('active'));
+        const btn = document.querySelector(`#match-duration .size-option[data-dur="${md}"]`);
+        if (btn) btn.classList.add('active');
+      }
+    } catch (_) {}
 
     // ボタン
     document.getElementById('btn-create-room').addEventListener('click', () => this._onCreateRoom());
@@ -104,6 +145,24 @@ const App = {
       sensAutoBoost.checked = Input.autoBoost;
       sensAutoBoost.addEventListener('change', () => Input.setAutoBoost(sensAutoBoost.checked));
     }
+    const sensCurve = document.getElementById('sens-curve');
+    const sensCurveVal = document.getElementById('sens-curve-val');
+    if (sensCurve && sensCurveVal) {
+      sensCurve.value = Math.round(Input.steerCurveExp * 100);
+      sensCurveVal.textContent = Input.steerCurveExp.toFixed(2);
+      sensCurve.addEventListener('input', () => {
+        const v = parseInt(sensCurve.value, 10) / 100;
+        Input.setCurve(v);
+        sensCurveVal.textContent = v.toFixed(2);
+      });
+    }
+    const sensRecal = document.getElementById('sens-recal');
+    if (sensRecal) {
+      sensRecal.addEventListener('click', () => {
+        Input.recalibrate();
+        showToast('🧭 ジャイロ基準リセット', 1000);
+      });
+    }
     // ポーズ
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) {
@@ -141,13 +200,35 @@ const App = {
 
     this._show('title');
 
-    // デバッグ用ショートカット: ?autosolo=1 でタイトルをスキップしてソロ開始
+    // デバッグ用ショートカット
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('autosolo') === '1') {
         setTimeout(() => this._onSolo(), 400);
       }
     } catch (_) {}
+
+    // デバッグキー: G=自分側にゴール強制 / O=相手側にゴール強制 / Tab=スコア倍速
+    window.addEventListener('keydown', (e) => {
+      if (!Game.running) return;
+      if (e.key === 'g' && e.ctrlKey) {
+        // Ctrl+G: ボールをBLUE側ゴールに飛ばす
+        if (Game.ball) {
+          Game.ball.x = 0;
+          Game.ball.y = BallPhys.RADIUS + 6;
+          Game.ball.z = Arena.L / 2 + 5;
+          Game.ball.vx = 0; Game.ball.vy = 0; Game.ball.vz = 60;
+        }
+      }
+      if (e.key === 'o' && e.ctrlKey) {
+        if (Game.ball) {
+          Game.ball.x = 0;
+          Game.ball.y = BallPhys.RADIUS + 6;
+          Game.ball.z = -Arena.L / 2 - 5;
+          Game.ball.vx = 0; Game.ball.vy = 0; Game.ball.vz = -60;
+        }
+      }
+    });
 
     // ジャイロ自動有効化 (Android系)
     if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -247,7 +328,7 @@ const App = {
       });
     }
     this._show('game');
-    Game.startMatch({ players, duration: 300 });
+    Game.startMatch({ players, duration: this.matchDuration });
   },
 
   _readMyInfo() {
@@ -324,7 +405,7 @@ const App = {
       id: p.id, name: p.name, color: p.color, team: p.team || 'blue',
     }));
     Game.myInfo.id = Net.myId;
-    Net.startGame({ players, duration: 300 });
+    Net.startGame({ players, duration: this.matchDuration });
   },
 
   _leaveRoom() {

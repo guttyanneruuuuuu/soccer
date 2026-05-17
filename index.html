@@ -8,7 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Gyro Soccer Arena ⚽ スマホでカーサッカー</title>
+  <meta name="description" content="スマホのジャイロで車を操作するロケットリーグ風サッカーゲーム。ソロ・オンライン対戦・パワーアップアイテム搭載。" />
   <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="apple-touch-icon" href="favicon.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
@@ -58,6 +60,24 @@
         </div>
       </div>
 
+      <div class="size-select">
+        <label>Bot 難易度（ソロ）</label>
+        <div class="size-options" id="bot-difficulty">
+          <button type="button" class="size-option" data-diff="easy">😴 EASY</button>
+          <button type="button" class="size-option active" data-diff="normal">😎 NORMAL</button>
+          <button type="button" class="size-option" data-diff="hard">🔥 HARD</button>
+        </div>
+      </div>
+
+      <div class="size-select">
+        <label>試合時間</label>
+        <div class="size-options" id="match-duration">
+          <button type="button" class="size-option" data-dur="120">2分</button>
+          <button type="button" class="size-option active" data-dur="300">5分</button>
+          <button type="button" class="size-option" data-dur="600">10分</button>
+        </div>
+      </div>
+
       <div class="title-buttons">
         <button class="btn btn-primary" id="btn-create-room">🏠 部屋を作る</button>
         <button class="btn btn-secondary" id="btn-join-room">🔑 部屋に入る</button>
@@ -66,7 +86,7 @@
       <p class="hint">
         📱 <strong>横向き</strong>+<strong>ジャイロ</strong>で操作！<br>
         🔄 左右に傾ける=ステア / 🪑 手前に倒す=ブレーキ・バック<br>
-        🔥 BOOST(左下) で加速 / ⬆ JUMP(右下) でジャンプ・ダブルジャンプフリップ<br>
+        🚗 ACCEL(右下) で前進 / ⬆ JUMP(左下) でジャンプ・ダブルジャンプフリップ<br>
         🛡 フィールドに浮かぶアイテムでパワーアップ ( SHIELD / MAGNET / GIANT / TURBO / SPRING )<br>
         💥 ブースト中の体当たりで敵車をデモリッション！<br>
         最大 4v4（8人）のオンライン対戦＆Botと練習可能！
@@ -153,10 +173,10 @@
       <div id="brake-indicator" class="brake-indicator">🅑 BRAKE</div>
     </div>
 
-    <!-- タッチ操作: BOOST(左下) + JUMP(右下) -->
+    <!-- タッチ操作: JUMP(左下) + ACCEL(右下) -->
     <div class="touch-controls">
-      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥<br>BOOST</button>
       <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆<br>JUMP</button>
+      <button class="ctrl-btn ctrl-accel" id="ctrl-accel">🚗<br>ACCEL</button>
     </div>
 
     <!-- ミニマップ (上部右) -->
@@ -186,14 +206,22 @@
     <div class="sensitivity-ctrl" id="sensitivity-ctrl">
       <div class="sens-row">
         <label>感度</label>
-        <input type="range" id="sens-slider" min="8" max="35" step="1" value="18" />
+        <input type="range" id="sens-slider" min="8" max="40" step="1" value="18" />
         <span id="sens-val">18°</span>
+      </div>
+      <div class="sens-row">
+        <label>カーブ</label>
+        <input type="range" id="sens-curve" min="100" max="200" step="5" value="145" />
+        <span id="sens-curve-val">1.45</span>
       </div>
       <div class="sens-row">
         <label class="invert-lbl"><input type="checkbox" id="sens-invert" /> ステア反転</label>
       </div>
       <div class="sens-row">
         <label class="invert-lbl"><input type="checkbox" id="sens-autoboost" /> 前傾でブースト</label>
+      </div>
+      <div class="sens-row">
+        <button type="button" id="sens-recal" class="btn btn-ghost btn-mini-wide">🧭 再キャリブレ</button>
       </div>
     </div>
 
@@ -202,6 +230,7 @@
       <div class="finish-card">
         <h2 id="finish-title">FULL TIME!</h2>
         <div id="finish-score" class="finish-score">0 - 0</div>
+        <div id="finish-stats" class="finish-stats"></div>
         <button class="btn btn-primary" id="btn-back-lobby">🏠 戻る</button>
       </div>
     </div>

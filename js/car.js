@@ -3,33 +3,39 @@
 // アクセル: 自動 ON。ブレーキ/バック: ジャイロのピッチ (端末を後ろに傾ける) で発動。
 const CarPhys = {
   // サイズ (一回り大きく: 操作中車をでかく見せるため少し大きく)
-  RADIUS: 2.4,
-  HEIGHT: 1.7,
+  RADIUS: 4.8,
+  HEIGHT: 3.4,
 
-  // 速度パラメタ (操作感アップ)
-  MAX_SPEED: 50,          // m/s 通常最大 (180 km/h)
-  MAX_SPEED_BOOST: 78,    // ブースト時 (280 km/h)
-  ACCEL: 44,              // 38 → 44 (キビキビ)
-  REVERSE_ACCEL: 26,
-  BRAKE: 72,              // 60 → 72
-  FRICTION: 2.4,
-  AIR_FRICTION: 0.28,
-  STEER_SPEED: 3.6,       // 3.0 → 3.6 (ハンドリング鋭く)
-  STEER_AT_SPEED: 0.55,   // 高速時もそこそこ効く
+  // 速度パラメタ (操作感アップ + キビキビした応答)
+  MAX_SPEED: 76,
+  MAX_SPEED_BOOST: 100,
+  ACCEL: 64,             // 60 → 64: 加速ややキビキビ
+  REVERSE_ACCEL: 28,
+  BRAKE: 78,             // 62 → 78: ブレーキを強めに (急停止可能)
+  FRICTION: 3.4,
+  AIR_FRICTION: 0.34,
+  STEER_SPEED: 3.25,     // 3.0 → 3.25: 旋回はやや速く
+  STEER_AT_SPEED: 0.55,  // 高速時のステア効きを下げて挙動安定
   LATERAL_GRIP: 11.0,
+  // 低速での旋回ボーナス (止まりかけでクイック切返し可能)
+  STEER_LOW_SPEED_BONUS: 1.4,
 
   // 物理 (ジャンプ強化)
   GRAVITY: 42,
-  JUMP_VEL: 24,           // 22 → 24
-  DOUBLE_JUMP_VEL: 22,    // 19 → 22 (ダブルジャンプも気持ちよく)
+  JUMP_VEL: 31,           // 初段でおよそ y+11 前後まで上がる体感に調整
+  DOUBLE_JUMP_VEL: 27,    // 2段目でも高度をしっかり維持できる値に調整
   AIR_PITCH_SPEED: 5.2,   // 空中ピッチ速度アップ
   AIR_ROLL_SPEED: 5.2,    // 空中ロール速度アップ
 
   // ブースト (もう少し強く・出る量も多く)
-  BOOST_FORCE: 88,
-  BOOST_PER_SEC: 32,
-  BOOST_MAX: 100,
+  BOOST_FORCE: 110,
+  BOOST_PER_SEC: 40,
+  BOOST_MAX: 120,
   BOOST_INITIAL: 50,      // 33 → 50 (試合開始で動きやすく)
+  WALL_BOUNCE: 0.18,
+  WALL_SPEED_KEEP: 0.9,
+  WALL_CLIMB_MIN_IMPACT: 6,
+  WALL_CLIMB_VEL: 8.2,
 };
 
 class Car {
@@ -88,7 +94,7 @@ class Car {
     const colorHex = parseInt(this.color.replace('#',''), 16);
 
     // ロケットリーグ風: 平たくワイドに。スケールアップして「でかく見せる」
-    const S = 1.7;
+    const S = 3.4;
 
     // ボディ
     const body = new THREE.Mesh(
@@ -281,7 +287,9 @@ class Car {
       if (this.onGround) {
         // 地上はヨー (ハンドル) — 後進中は逆向きに効くと自然
         const dir = this.speed >= 0 ? 1 : -1;
-        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * dir * dt;
+        // 低速で旋回しやすく (止まっていれば即その場で回頭)
+        const lowSpeedBoost = 1 + (1 - speedRatio) * (CarPhys.STEER_LOW_SPEED_BONUS - 1);
+        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * lowSpeedBoost * dir * dt;
         // 地上のロール演出 (見た目だけ。コーナリングで車体が傾く)
         const targetRoll = -input.steer * Math.min(0.18, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.25);
         this.roll = Utils.lerp(this.roll, targetRoll, dt * 6);
@@ -304,8 +312,8 @@ class Car {
       }
     }
 
-    // ===== 自動アクセル + ピッチによるブレーキ =====
-    // input.accel は常に true (UI で自動 ON)。input.brake (ジャイロ後傾) で減速/バック。
+    // ===== アクセル入力 + ピッチによるブレーキ =====
+    // input.accel (ACCELボタン/キー) で前進。input.brake (ジャイロ後傾) で減速/バック。
     if (input && this.onGround) {
       if (input.brake) {
         if (this.speed > 0) this.speed -= CarPhys.BRAKE * dt;
@@ -455,28 +463,54 @@ class Car {
 
   _resolveArenaCollisions() {
     const r = CarPhys.RADIUS;
+    const climbFromWall = (impactSpeed) => {
+      if (!this.onGround) return;
+      if (impactSpeed < CarPhys.WALL_CLIMB_MIN_IMPACT) return;
+      if (this.y >= Arena.H - r - 0.5) return;
+      const lift = CarPhys.WALL_CLIMB_VEL + Math.min(3.2, impactSpeed * 0.14);
+      this.vy = Math.max(this.vy, lift);
+      this.y = Math.max(this.y, CarPhys.HEIGHT + 0.06);
+      this.onGround = false;
+    };
+
     // 側壁 X
     if (this.x > Arena.W/2 - r) {
       this.x = Arena.W/2 - r;
-      if (this.vx > 0) this.vx = -this.vx * 0.4;
-      this.speed *= 0.55;
+      if (this.vx > 0) {
+        const impact = this.vx;
+        this.vx = -this.vx * CarPhys.WALL_BOUNCE;
+        this.speed *= CarPhys.WALL_SPEED_KEEP;
+        climbFromWall(impact);
+      }
     }
     if (this.x < -Arena.W/2 + r) {
       this.x = -Arena.W/2 + r;
-      if (this.vx < 0) this.vx = -this.vx * 0.4;
-      this.speed *= 0.55;
+      if (this.vx < 0) {
+        const impact = -this.vx;
+        this.vx = -this.vx * CarPhys.WALL_BOUNCE;
+        this.speed *= CarPhys.WALL_SPEED_KEEP;
+        climbFromWall(impact);
+      }
     }
     // 短辺 Z (ゴール口除外)
     const inGoalSlot = Arena.isInGoalSlot(this.x, this.y, r);
     if (this.z > Arena.L/2 - r && !inGoalSlot) {
       this.z = Arena.L/2 - r;
-      if (this.vz > 0) this.vz = -this.vz * 0.4;
-      this.speed *= 0.55;
+      if (this.vz > 0) {
+        const impact = this.vz;
+        this.vz = -this.vz * CarPhys.WALL_BOUNCE;
+        this.speed *= CarPhys.WALL_SPEED_KEEP;
+        climbFromWall(impact);
+      }
     }
     if (this.z < -Arena.L/2 + r && !inGoalSlot) {
       this.z = -Arena.L/2 + r;
-      if (this.vz < 0) this.vz = -this.vz * 0.4;
-      this.speed *= 0.55;
+      if (this.vz < 0) {
+        const impact = -this.vz;
+        this.vz = -this.vz * CarPhys.WALL_BOUNCE;
+        this.speed *= CarPhys.WALL_SPEED_KEEP;
+        climbFromWall(impact);
+      }
     }
     // 天井
     if (this.y > Arena.H - r) {
