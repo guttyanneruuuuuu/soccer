@@ -365,9 +365,7 @@ class Car {
 
     // ===== ジャンプ (スプリングパワー所持で2倍 & 3段) =====
     const isSpring = this.activePower === 'spring';
-    const zoneJumpMult = (typeof Arena !== 'undefined' && Arena.getJumpBoostAt)
-      ? Arena.getJumpBoostAt(this.x, this.z)
-      : 1;
+    const zoneJumpMult = Arena.getJumpBoostAt(this.x, this.z);
     const jumpMult = (isSpring ? 1.8 : 1) * zoneJumpMult;
     const maxJumps = isSpring ? 3 : 2;
     if (input) {

@@ -3,16 +3,17 @@
 // この実寸を踏襲しつつ、空中プレーが楽しめるよう天井を高めに 42m に設定。
 // Z軸: 長辺(ゴール方向)。X軸: 短辺。Y軸: 上方向。
 const ARENA_SCALE = 7.0;
-const SUPER_JUMP_CENTER_RADIUS = 4.2;
-const SUPER_JUMP_SIDE_RADIUS = 3.6;
-const SUPER_JUMP_CENTER_MULT = 3.2;
-const SUPER_JUMP_SIDE_MULT = 2.8;
-const SUPER_JUMP_SIDE_OFFSET = 18;
-const SUPER_JUMP_PULSE_SPEED = 220;
-const SUPER_JUMP_PULSE_PHASE = 0.03;
-const SUPER_JUMP_PULSE_AMPLITUDE = 0.1;
-const SUPER_JUMP_BASE_OPACITY = 0.32;
-const SUPER_JUMP_OPACITY_GAIN = 0.9;
+const SUPER_JUMP_CENTER_RADIUS = 4.2;   // 中央ゾーン半径 (Arena.SCALE 倍のワールド座標)
+const SUPER_JUMP_SIDE_RADIUS = 3.6;     // 左右ゾーン半径 (Arena.SCALE 倍)
+const SUPER_JUMP_CENTER_MULT = 3.2;     // 中央ゾーンのジャンプ倍率
+const SUPER_JUMP_SIDE_MULT = 2.8;       // 左右ゾーンのジャンプ倍率
+const SUPER_JUMP_SIDE_OFFSET = 18;      // 左右ゾーン中心のXオフセット (Arena.SCALE 倍)
+const SUPER_JUMP_PULSE_SPEED = 220;     // ゾーン脈動スピード (msベース係数)
+const SUPER_JUMP_PULSE_PHASE = 0.03;    // 位置ごとの位相ずらし係数
+const SUPER_JUMP_PULSE_AMPLITUDE = 0.1; // 脈動スケール振幅
+const SUPER_JUMP_ZONE_OPACITY = 0.4;    // 初期表示時のゾーン面 opacity
+const SUPER_JUMP_BASE_OPACITY = 0.32;   // 脈動計算のベース opacity
+const SUPER_JUMP_OPACITY_GAIN = 0.9;    // 脈動で増える opacity 量
 
 const Arena = {
   SCALE: ARENA_SCALE,       // ユーザー要望: コートを約6倍へ
@@ -333,7 +334,7 @@ const Arena = {
       const zoneMesh = new THREE.Mesh(
         new THREE.CircleGeometry(jz.radius, 28),
         new THREE.MeshBasicMaterial({
-          color: 0x7c4dff, transparent: true, opacity: 0.4, side: THREE.DoubleSide,
+          color: 0x7c4dff, transparent: true, opacity: SUPER_JUMP_ZONE_OPACITY, side: THREE.DoubleSide,
         })
       );
       zoneMesh.rotation.x = -Math.PI / 2;
@@ -427,7 +428,7 @@ const Arena = {
     }
     for (const z of this.superJumpZones) {
       if (!z || !z.ring || !z.mesh) continue;
-      const pulse = 1 + Math.sin(now / SUPER_JUMP_PULSE_SPEED + z.x * SUPER_JUMP_PULSE_PHASE + z.z * SUPER_JUMP_PULSE_PHASE) * SUPER_JUMP_PULSE_AMPLITUDE;
+      const pulse = 1 + Math.sin(now / SUPER_JUMP_PULSE_SPEED + (z.x + z.z) * SUPER_JUMP_PULSE_PHASE) * SUPER_JUMP_PULSE_AMPLITUDE;
       z.ring.scale.set(pulse, pulse, 1);
       z.mesh.material.opacity = SUPER_JUMP_BASE_OPACITY + Math.max(0, pulse - 1) * SUPER_JUMP_OPACITY_GAIN;
     }
