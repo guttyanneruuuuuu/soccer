@@ -66,7 +66,7 @@
 ## 🌍 GitHub Pages
 
 - 公開 URL: **https://guttyanneruuuuuu.github.io/soccer/**
-- `main` または `master` ブランチへの push で自動デプロイされます（`.github/workflows/deploy-pages.yml`）。
+- `genspark_ai_developer` / `main` / `master` への push で自動デプロイされます（`.github/workflows/deploy-pages.yml`）。
 
 ---
 
