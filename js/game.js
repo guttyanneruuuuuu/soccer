@@ -221,11 +221,10 @@ const Game = {
     if (!Number.isFinite(this.goalAnimTimer)) this.goalAnimTimer = 0;
     if (!Number.isFinite(this._goalResetSafetyTimer)) this._goalResetSafetyTimer = 0;
 
-    // ゴール演出中
-    if (this.goalAnimTimer > 0) {
-      this.goalAnimTimer = Math.max(0, this.goalAnimTimer - dt);
-    }
     if (this._goalResetPending) {
+      if (this.goalAnimTimer > 0) {
+        this.goalAnimTimer = Math.max(0, this.goalAnimTimer - dt);
+      }
       this._goalResetSafetyTimer = Math.max(0, this._goalResetSafetyTimer - dt);
       const animationComplete = this.goalAnimTimer <= 0;        // 通常復帰
       const failsafeTriggered = this._goalResetSafetyTimer <= 0; // タイマー破綻時の保険
