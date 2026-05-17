@@ -20,8 +20,8 @@ const CarPhys = {
 
   // 物理 (ジャンプ強化)
   GRAVITY: 42,
-  JUMP_VEL: 24,           // 22 → 24
-  DOUBLE_JUMP_VEL: 22,    // 19 → 22 (ダブルジャンプも気持ちよく)
+  JUMP_VEL: 31,           // 高く飛べるよう強化
+  DOUBLE_JUMP_VEL: 27,    // 追加入力でもしっかり上がる
   AIR_PITCH_SPEED: 5.2,   // 空中ピッチ速度アップ
   AIR_ROLL_SPEED: 5.2,    // 空中ロール速度アップ
 
@@ -304,8 +304,8 @@ class Car {
       }
     }
 
-    // ===== 自動アクセル + ピッチによるブレーキ =====
-    // input.accel は常に true (UI で自動 ON)。input.brake (ジャイロ後傾) で減速/バック。
+    // ===== アクセル入力 + ピッチによるブレーキ =====
+    // input.accel (ACCELボタン/キー) で前進。input.brake (ジャイロ後傾) で減速/バック。
     if (input && this.onGround) {
       if (input.brake) {
         if (this.speed > 0) this.speed -= CarPhys.BRAKE * dt;

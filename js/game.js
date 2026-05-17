@@ -247,7 +247,7 @@ const Game = {
     if (this.localCar && !kickoffActive && this.goalAnimTimer <= 0) {
       inputState = {
         steer: Input.steer,
-        accel: true,        // 自動 ON
+        accel: Input.accel,
         brake: Input.brake,
         boost: Input.boost,
         jump: Input.consumeJump(),
@@ -274,7 +274,7 @@ const Game = {
           continue;
         }
         let inp = this.remoteInputs.get(id);
-        if (!inp) inp = { steer: 0, accel: true, brake: false, boost: false, jump: false };
+        if (!inp) inp = { steer: 0, accel: false, brake: false, boost: false, jump: false };
         car.update(dt, inp);
         if (inp.jump) inp.jump = false;
       }
@@ -325,7 +325,7 @@ const Game = {
       // クライアント: 入力をホストへ送信
       Net.sendToHost({ type: 'input', input: {
         steer: Input.steer,
-        accel: true,
+        accel: Input.accel,
         brake: Input.brake,
         boost: Input.boost,
         jump: this._lastLocalInput ? this._lastLocalInput.jump : false,
