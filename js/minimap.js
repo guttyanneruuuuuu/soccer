@@ -1,27 +1,36 @@
 // ============= ミニマップ (上から見たアリーナをcanvas2Dで描画) =============
+// PDCA7 改善:
+//   - 30fps で描画 (毎フレーム描画から間引き → 軽量化)
+//   - ボール高さインジケータ強化
+//   - パワーアップ取得済み車に小さなオーラを描画
 const Minimap = {
   canvas: null,
   ctx: null,
   pad: 8,
+  _lastDrawT: 0,
+  _drawInterval: 1000 / 30, // 30fps
 
   init() {
     this.canvas = document.getElementById('minimap');
     if (!this.canvas) return;
     this.ctx = this.canvas.getContext('2d');
+    this._lastDrawT = 0;
   },
 
   draw() {
     if (!this.ctx || !Game.localCar) return;
+    const now = performance.now();
+    if (now - this._lastDrawT < this._drawInterval) return;
+    this._lastDrawT = now;
+
     const W = this.canvas.width;
     const H = this.canvas.height;
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
 
-    // 背景
     ctx.fillStyle = 'rgba(20,40,60,0.55)';
     ctx.fillRect(0, 0, W, H);
 
-    // アリーナ枠 (Z=縦軸→Y, X=横軸)
     const pad = this.pad;
     const aw = W - pad * 2;
     const ah = H - pad * 2;
@@ -41,12 +50,11 @@ const Minimap = {
     ctx.moveTo(toMx(-Arena.W / 2), toMz(0));
     ctx.lineTo(toMx(Arena.W / 2), toMz(0));
     ctx.stroke();
-    // センターサークル
     ctx.beginPath();
     ctx.arc(toMx(0), toMz(0), 14 * Math.min(sx, sz), 0, Math.PI * 2);
     ctx.stroke();
 
-    // ゴール (青/橙)
+    // ゴール
     ctx.fillStyle = '#29b6f6';
     ctx.fillRect(toMx(-Arena.GOAL_W / 2), toMz(-Arena.L / 2) - 2,
       Arena.GOAL_W * sx, 4);
@@ -85,10 +93,19 @@ const Minimap = {
       const isMe = car === Game.localCar;
       const cx = toMx(car.x);
       const cz = toMz(car.z);
+      // パワー所持中のオーラ (背景に大きめの円)
+      if (car.activePower && typeof PowerUps !== 'undefined') {
+        const meta = PowerUps.META[car.activePower];
+        if (meta) {
+          ctx.fillStyle = '#' + meta.color.toString(16).padStart(6, '0') + '55';
+          ctx.beginPath();
+          ctx.arc(cx, cz, 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       ctx.save();
       ctx.translate(cx, cz);
-      ctx.rotate(-car.angle); // canvas y軸はworld -z 軸に近い
-      // 三角形 (車向き)
+      ctx.rotate(-car.angle);
       ctx.beginPath();
       ctx.moveTo(0, -4);
       ctx.lineTo(-2.6, 3);
@@ -114,10 +131,9 @@ const Minimap = {
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.stroke();
-    // ボール影 (高さ)
     if (Game.ball.y > 4) {
       ctx.beginPath();
-      ctx.arc(bx, bz, 1.5, 0, Math.PI * 2);
+      ctx.arc(bx, bz, 1.5 + Math.min(2, Game.ball.y / 30), 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fill();
     }

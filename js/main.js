@@ -1,8 +1,13 @@
 // ============= UI フロー (タイトル → ロビー → ゲーム) =============
+// PDCA7 改善:
+//   - 感度プリセット (LOW/MED/HIGH) ボタン
+//   - 音量スライダー & ミュートスイッチ
+//   - 試合終了画面に「もう一回」(リスタート) ボタン
+//   - リスタートボタン (ゲーム内)
 const App = {
   screen: 'title',
   myInfo: { name: 'Player', color: '#E53935', team: 'blue' },
-  matchDuration: 300, // 秒
+  matchDuration: 300,
 
   init() {
     SFX.init();
@@ -68,6 +73,17 @@ const App = {
       });
     });
 
+    // ジャイロ感度プリセット (タイトル画面)
+    document.querySelectorAll('#gyro-preset .size-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        document.querySelectorAll('#gyro-preset .size-option').forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+        Input.setPreset(opt.dataset.preset);
+        this._syncSensSliders();
+        showToast && showToast(`感度: ${opt.textContent.trim()}`, 900);
+      });
+    });
+
     // 保存された設定の復元
     try {
       const sd = localStorage.getItem('soccer-bot-diff');
@@ -86,6 +102,14 @@ const App = {
         const btn = document.querySelector(`#match-duration .size-option[data-dur="${md}"]`);
         if (btn) btn.classList.add('active');
       }
+      const preset = localStorage.getItem('soccer-preset');
+      if (preset) {
+        const btn = document.querySelector(`#gyro-preset .size-option[data-preset="${preset}"]`);
+        if (btn) {
+          document.querySelectorAll('#gyro-preset .size-option').forEach(o => o.classList.remove('active'));
+          btn.classList.add('active');
+        }
+      }
     } catch (_) {}
 
     // ボタン
@@ -98,6 +122,14 @@ const App = {
     document.getElementById('btn-leave-room').addEventListener('click', () => this._leaveRoom());
     document.getElementById('btn-copy-code').addEventListener('click', () => this._copyCode());
     document.getElementById('btn-back-lobby').addEventListener('click', () => this._backFromGame());
+    // リマッチ (試合終了画面)
+    const rematchBtn = document.getElementById('btn-rematch');
+    if (rematchBtn) {
+      rematchBtn.addEventListener('click', () => {
+        document.getElementById('finish-overlay').classList.remove('show');
+        Game.restartMatch();
+      });
+    }
 
     // ロビー: チーム切替
     document.getElementById('btn-team-blue').addEventListener('click', () => this._setMyTeam('blue'));
@@ -118,7 +150,7 @@ const App = {
       document.getElementById('gyro-permission').classList.remove('show');
     });
 
-    // カメラ視点切替ボタン
+    // カメラ視点切替
     const cameraBtn = document.getElementById('btn-camera');
     if (cameraBtn) {
       cameraBtn.addEventListener('click', () => {
@@ -128,14 +160,37 @@ const App = {
       });
     }
 
-    // ゲーム内設定
+    // リスタート
+    const restartBtn = document.getElementById('btn-restart');
+    if (restartBtn) {
+      restartBtn.addEventListener('click', () => {
+        if (!Game.running && !Game.matchEnded) return;
+        if (confirm('試合をリスタートしますか？')) {
+          Game.restartMatch();
+        }
+      });
+    }
+
+    // ジャイロ再キャリブ
     document.getElementById('btn-recalibrate').addEventListener('click', () => {
       Input.recalibrate();
       showToast('🧭 ジャイロ基準リセット', 1000);
     });
+
+    // 設定パネル
     document.getElementById('btn-toggle-sens').addEventListener('click', () => {
       document.getElementById('sensitivity-ctrl').classList.toggle('show');
     });
+
+    // 感度プリセット (ゲーム内パネル)
+    document.querySelectorAll('.sens-presets .preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Input.setPreset(btn.dataset.preset);
+        this._syncSensSliders();
+        showToast && showToast(`感度: ${btn.textContent.trim()}`, 800);
+      });
+    });
+
     const sensSlider = document.getElementById('sens-slider');
     if (sensSlider) {
       sensSlider.value = Input.sensitivity;
@@ -168,7 +223,6 @@ const App = {
       sensBallcam.addEventListener('change', () => {
         try { localStorage.setItem('soccer-ballcam', sensBallcam.checked ? '1' : '0'); } catch (_) {}
         Game.ballCamDefault = sensBallcam.checked;
-        // 現在ゲーム中なら即時反映
         if (Game.running) Game.cameraMode = sensBallcam.checked ? 'ball' : 'chase';
       });
     }
@@ -182,6 +236,22 @@ const App = {
         Input.setCurve(v);
         sensCurveVal.textContent = v.toFixed(2);
       });
+    }
+    // 音量
+    const volSlider = document.getElementById('vol-slider');
+    if (volSlider) {
+      volSlider.value = Math.round(SFX.getVolume() * 100);
+      document.getElementById('vol-val').textContent = volSlider.value;
+      volSlider.addEventListener('input', () => {
+        const v = parseInt(volSlider.value, 10) / 100;
+        SFX.setVolume(v);
+        document.getElementById('vol-val').textContent = volSlider.value;
+      });
+    }
+    const muteBox = document.getElementById('sens-mute');
+    if (muteBox) {
+      muteBox.checked = SFX.isMuted();
+      muteBox.addEventListener('change', () => SFX.mute(muteBox.checked));
     }
     const sensRecal = document.getElementById('sens-recal');
     if (sensRecal) {
@@ -238,7 +308,6 @@ const App = {
     // デバッグキー
     window.addEventListener('keydown', (e) => {
       if (!Game.running) return;
-      // 入力中なら無視
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.key === 'g' && e.ctrlKey) {
@@ -257,12 +326,16 @@ const App = {
           Game.ball.vx = 0; Game.ball.vy = 0; Game.ball.vz = -60;
         }
       }
+      // R でリスタート
+      if (e.key === 'r' && !e.ctrlKey && !e.metaKey) {
+        Game.restartMatch && Game.restartMatch();
+      }
     });
 
     // ジャイロ自動有効化 (Android系)
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
-      // iOSは明示許可必須なので何もしない
+      // iOS: 明示許可必須
     } else {
       Input.enableGyro().then(ok => {
         if (ok) console.log('gyro auto-enabled');
@@ -270,8 +343,20 @@ const App = {
     }
   },
 
+  _syncSensSliders() {
+    const sensSlider = document.getElementById('sens-slider');
+    const sensCurve = document.getElementById('sens-curve');
+    if (sensSlider) {
+      sensSlider.value = Input.sensitivity;
+      document.getElementById('sens-val').textContent = `${Input.sensitivity}°`;
+    }
+    if (sensCurve) {
+      sensCurve.value = Math.round(Input.steerCurveExp * 100);
+      document.getElementById('sens-curve-val').textContent = Input.steerCurveExp.toFixed(2);
+    }
+  },
+
   _tryLockLandscape() {
-    // 一部Android端末で横画面ロックを試みる
     try {
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock('landscape').catch(() => {});
@@ -337,7 +422,6 @@ const App = {
     Game.myInfo = { id: 'me', name: this.myInfo.name, color: this.myInfo.color, team: this.myInfo.team };
     const oppositeTeam = this.myInfo.team === 'blue' ? 'orange' : 'blue';
     const size = Game.matchSize;
-    const myTeamColor = this.myInfo.color;
     const teamMatePalette = ['#26C6DA', '#66BB6A', '#AB47BC', '#FF7043', '#FFA000', '#5C6BC0'];
     const enemyPalette = ['#EF5350', '#FFA726', '#7E57C2', '#42A5F5', '#26A69A', '#EC407A'];
     for (let i = 1; i < size; i++) {
@@ -415,7 +499,6 @@ const App = {
   _hostStart() {
     if (!Net.isHost) return;
     const playerList = Net._playerList();
-    // バランスチェック: チーム差>1 ならエラー
     let blue = 0, orange = 0;
     for (const p of playerList) {
       if (p.team === 'blue') blue++;
@@ -424,7 +507,6 @@ const App = {
     if (Math.abs(blue - orange) > 1) {
       showToast(`⚖️ チームバランスが悪いです (${blue} vs ${orange})`, 2200);
     }
-    // 上限チェック
     const sizeLimit = Math.max(blue, orange);
     if (sizeLimit > 4) {
       showToast('1チーム最大4人までです', 2200);

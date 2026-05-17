@@ -1,24 +1,26 @@
 // ============= ゲームメイン (シーン/カメラ/ループ/ホストシム) =============
-// 主な改良点 (この版):
-//  - 致命バグ修正: ゴール後固まる問題 (PowerUps の Group dispose クラッシュ)
-//  - パーティクルをオブジェクトプール化して GC/dispose のコストを削減
-//  - クライアントでもボールを内挿補間して 60fps で滑らかに描画
-//  - シャドウ品質をモバイル向けに自動調整 (軽量化)
-//  - スローモーション演出 (ゴール時) + シュートインジケータ
-//  - ゲーム終了画面の統計情報 (ゴール/アシスト/デモ)
-//  - キックオフカウントダウンを画面に表示
-//  - ローカル車のゴール時に専用バナーとフラッシュ
+// PDCA7 (このバージョン)の主な改良:
+//   - 軽量化: シャドウマップ更新を 2フレームに 1回 (静的シーンなので問題なし)
+//   - 軽量化: パーティクルプール初期サイズを 120 → 60 に縮小
+//   - リスタート機能 (ポーズ画面から: 同じメンバーで再戦)
+//   - エンドゲームのリプレイ風カメラ演出 (ボールズーム)
+//   - 入力に handbrake を追加し車に伝達
+//   - 試合中の車のlockTimer がゴール演出中に効くよう徹底 (動かない)
+//   - QuickChat.tick() を毎フレーム呼び出してバブル追従
+//   - Bot AI に「シールド/ターボ取得時の積極策」を追加
+//   - ゴール演出中はパワーアップアニメだけ続行 (取得判定は止まる)
+//   - メインループに固定タイムステップを採用 (60Hz 物理)
 const Game = {
   scene: null,
   camera: null,
   renderer: null,
   canvas: null,
 
-  cars: new Map(),       // id -> Car
+  cars: new Map(),
   localCar: null,
   ball: null,
 
-  remoteInputs: new Map(), // ホスト用: clientId -> 最新input
+  remoteInputs: new Map(),
 
   scoreBlue: 0,
   scoreOrange: 0,
@@ -29,75 +31,79 @@ const Game = {
   goalAnimTimer: 0,
   kickoffCountdown: 0,
   _lastBoostPadCheck: 0,
-  _slowmoT: 0,           // ゴール時スローモーション残り時間 (秒)
+  _slowmoT: 0,
+  _replayT: 0, // エンドゲームリプレイ演出残り時間
 
-  // ホストシム
   matchSize: 3,
   myInfo: { id: 'me', name: 'Player', color: '#E53935', team: 'blue' },
-  botDifficulty: 'normal', // 'easy' | 'normal' | 'hard'
+  botDifficulty: 'normal',
 
+  // ネット状態送信間隔
   _stateAccum: 0,
   _stateInterval: 1 / 20,
+
+  // フレーム蓄積 (固定60Hz物理)
+  _physAccum: 0,
+  _fixedStep: 1 / 60,
+  _maxStepsPerFrame: 4,
 
   lastFrameTime: 0,
   running: false,
   paused: false,
 
-  // パーティクル (オブジェクトプール化)
   _particlePool: [],
-  _particleMax: 120,     // 最大同時パーティクル数。これ以上は出さない
+  _particleMax: 60, // 120 → 60 に削減 (軽量化)
   _activeParticles: [],
 
-  // 統計情報 (per car: { goals, assists, demos, demoed })
   stats: new Map(),
+  _lastMatchOpts: null, // リスタート用
 
-  // カメラモード ('chase' = 後方追従、'ball' = ボール視点 (車→ボール方向))
   cameraMode: 'chase',
   ballCamDefault: false,
 
-  // コンボシステム (ローカルプレイヤーの連続ヒット数)
   comboCount: 0,
   comboTimer: 0,
-  COMBO_WINDOW: 2.5, // 秒
+  COMBO_WINDOW: 2.5,
+
+  // 軽量化: シャドウマップ更新間引き
+  _shadowFrame: 0,
 
   init() {
     this.canvas = document.getElementById('game-canvas');
     const scene = new THREE.Scene();
-    // 夜間スタジアム風: 深い青紫
     scene.background = new THREE.Color(0x0a1428);
     scene.fog = new THREE.Fog(0x0a1428, Arena.L * 0.45, Arena.L * 2.6);
     this.scene = scene;
 
     const aspect = window.innerWidth / window.innerHeight;
-    // 基本FOV=68 (キビキビ感とスケール感のバランス)。ブースト中に動的に上がる。
     this.camera = new THREE.PerspectiveCamera(68, aspect, 0.1, 5200);
     this.camera.position.set(0, 40, -120);
     this.camera.lookAt(0, 0, 0);
     this._camLook = { x: 0, y: 0, z: 0 };
     this._camShake = 0;
 
-    // === レンダラー: 端末性能に応じて軽量化 ===
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antialias: this._wantAA(),
       powerPreference: 'high-performance',
     });
-    // モバイルは pixelRatio 上限 1.5 (軽量化)。デスクトップは 2。
     const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '');
     const maxPR = isMobile ? 1.5 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPR));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+    // 軽量化: シャドウを自動更新せず手動制御
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
+    this._isMobile = isMobile;
 
-    // === ライティング: 夜間スタジアム風 ===
+    // === ライティング ===
     const amb = new THREE.AmbientLight(0xb0c4ff, 0.42);
     scene.add(amb);
-    // メインの天上ライト (スタジアム照明)
     const sun = new THREE.DirectionalLight(0xffffff, 0.85);
     sun.position.set(Arena.W * 0.45, Arena.H * 0.9, Arena.L * 0.35);
     sun.castShadow = true;
-    // モバイルではシャドウマップ縮小
     const shadowSize = isMobile ? 1024 : 2048;
     sun.shadow.mapSize.set(shadowSize, shadowSize);
     const shadowSpan = Math.max(Arena.W, Arena.L) * 0.65;
@@ -109,12 +115,10 @@ const Game = {
     sun.shadow.camera.far = Arena.H * 3.8;
     scene.add(sun);
 
-    // 反対側からのフィルライト (青寄り)
     const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
     fill.position.set(-Arena.W * 0.5, Arena.H * 0.65, -Arena.L * 0.3);
     scene.add(fill);
 
-    // チームカラーの間接光 (両ゴール側)
     const goalLightBlue = new THREE.PointLight(0x29b6f6, 0.65, Arena.L * 0.8, 2);
     goalLightBlue.position.set(0, Arena.H * 0.35, -Arena.L / 2);
     scene.add(goalLightBlue);
@@ -122,7 +126,6 @@ const Game = {
     goalLightOrg.position.set(0, Arena.H * 0.35, Arena.L / 2);
     scene.add(goalLightOrg);
 
-    // ヘミスフィア (空青/床ダーク)
     const hemi = new THREE.HemisphereLight(0x4a6fb0, 0x101820, 0.4);
     scene.add(hemi);
 
@@ -133,10 +136,8 @@ const Game = {
     if (typeof Minimap !== 'undefined')  Minimap.init();
     if (typeof QuickChat !== 'undefined') QuickChat.init();
 
-    // パーティクルプール初期化
     this._initParticlePool();
 
-    // カメラモード復元 (ローカルストレージ)
     try {
       const saved = localStorage.getItem('soccer-ballcam');
       if (saved === '1') {
@@ -156,14 +157,11 @@ const Game = {
   },
 
   _wantAA() {
-    // モバイル小型端末は AA を OFF (軽量化)
     if (!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '')) return true;
-    // 高解像度端末は AA OFF でも見栄え良いので OFF
     if ((window.devicePixelRatio || 1) >= 2) return false;
     return true;
   },
 
-  // パーティクルをプールから取得 / 返却する仕組み (GC を抑える)
   _initParticlePool() {
     this._particlePool = [];
     this._activeParticles = [];
@@ -200,8 +198,8 @@ const Game = {
   },
 
   startMatch(opts) {
+    this._lastMatchOpts = opts;
     const players = opts.players || [{ ...this.myInfo, id: 'solo', isLocal: true }];
-    // クリーンアップ
     for (const c of this.cars.values()) this.scene.remove(c.mesh);
     this.cars.clear();
     this.remoteInputs.clear();
@@ -212,16 +210,14 @@ const Game = {
     this.matchEnded = false;
     this.goalAnimTimer = 0;
     this._slowmoT = 0;
+    this._replayT = 0;
     this.matchDuration = opts.duration || 300;
     this.kickoffCountdown = 3.0;
     this.stats = new Map();
 
-    // パワーアップもクリア (前試合の残りを消す)
     if (typeof PowerUps !== 'undefined') PowerUps.reset();
-    // パーティクルもクリア
     for (const p of this._activeParticles.slice()) this._releaseParticle(p);
 
-    // スポーン
     const blueList = players.filter(p => p.team === 'blue');
     const orgList  = players.filter(p => p.team === 'orange');
     const spawn = (list, zSign) => {
@@ -237,7 +233,6 @@ const Game = {
         this.cars.set(p.id, car);
         this.scene.add(car.mesh);
         if (isLocal) this.localCar = car;
-        // 統計初期化
         this.stats.set(p.id, {
           name: p.name, team: p.team, color: p.color,
           goals: 0, assists: 0, demos: 0, demoed: 0, boostPads: 0,
@@ -254,18 +249,31 @@ const Game = {
     document.getElementById('hud-time').textContent = Utils.formatTime(this.matchDuration * 1000);
     document.getElementById('finish-overlay').classList.remove('show');
 
-    // カメラデフォルト適用
     this.cameraMode = this.ballCamDefault ? 'ball' : 'chase';
-    // コンボリセット
     this.comboCount = 0;
     this.comboTimer = 0;
 
     this.running = true;
     this.paused = false;
+    this._physAccum = 0;
     this.lastFrameTime = performance.now();
     requestAnimationFrame(this._frame.bind(this));
 
+    // シャドウ初回フル更新
+    this.renderer.shadowMap.needsUpdate = true;
+
     this._showCountdown();
+  },
+
+  restartMatch() {
+    if (!this._lastMatchOpts) return false;
+    // ネット中はリスタート無効
+    if (Net.peer) {
+      showToast && showToast('オンラインではリスタートできません', 1500);
+      return false;
+    }
+    this.startMatch(this._lastMatchOpts);
+    return true;
   },
 
   _showCountdown() {
@@ -296,7 +304,6 @@ const Game = {
     setTimeout(tick, 1000);
   },
 
-  // キックオフ後の小カウントダウンを表示
   _showMiniCountdown() {
     const el = document.getElementById('countdown');
     if (!el) return;
@@ -310,15 +317,18 @@ const Game = {
 
   endMatch(winner) {
     this.matchEnded = true;
-    this.running = false;
-    const titleEl = document.getElementById('finish-title');
-    if (winner === 'blue') titleEl.textContent = '🔵 BLUE WIN!';
-    else if (winner === 'orange') titleEl.textContent = '🟠 ORANGE WIN!';
-    else titleEl.textContent = '🤝 DRAW';
-    document.getElementById('finish-score').textContent = `${this.scoreBlue} - ${this.scoreOrange}`;
-    // 統計を生成
-    this._renderFinishStats();
-    document.getElementById('finish-overlay').classList.add('show');
+    this._replayT = 2.5; // 2.5秒のリプレイ風カメラ
+    // running は継続して描画は続ける (リプレイ風)
+    // 一定時間後にオーバーレイ表示
+    setTimeout(() => {
+      const titleEl = document.getElementById('finish-title');
+      if (winner === 'blue') titleEl.textContent = '🔵 BLUE WIN!';
+      else if (winner === 'orange') titleEl.textContent = '🟠 ORANGE WIN!';
+      else titleEl.textContent = '🤝 DRAW';
+      document.getElementById('finish-score').textContent = `${this.scoreBlue} - ${this.scoreOrange}`;
+      this._renderFinishStats();
+      document.getElementById('finish-overlay').classList.add('show');
+    }, 2400);
     SFX.goal();
   },
 
@@ -326,7 +336,6 @@ const Game = {
     const host = document.getElementById('finish-stats');
     if (!host) return;
     host.innerHTML = '';
-    // 各プレイヤーのスタッツを並べる
     const rows = Array.from(this.stats.values());
     rows.sort((a, b) => (b.goals - a.goals) || (b.assists - a.assists) || (b.demos - a.demos));
     for (const s of rows) {
@@ -348,27 +357,43 @@ const Game = {
     let rawDt = Math.min(0.05, (now - this.lastFrameTime) / 1000);
     this.lastFrameTime = now;
     let dt = rawDt;
-    // スローモーション中は dt を縮める (描画は通常 fps、物理が遅くなる)
     if (this._slowmoT > 0) {
       this._slowmoT = Math.max(0, this._slowmoT - rawDt);
       dt = rawDt * 0.45;
     }
-    if (!this.paused) this.update(dt);
+    // 固定タイムステップで物理 update (チャタリング・dt 揺らぎ対策)
+    if (!this.paused) {
+      this._physAccum += dt;
+      let steps = 0;
+      while (this._physAccum >= this._fixedStep && steps < this._maxStepsPerFrame) {
+        this.update(this._fixedStep);
+        this._physAccum -= this._fixedStep;
+        steps++;
+      }
+      // 余りがあるが次フレームに繰越
+      if (steps >= this._maxStepsPerFrame) {
+        this._physAccum = 0; // 大幅な遅延時は破棄
+      }
+    }
     this.render();
 
-    // FPS 計測 (パフォーマンス自動調整用)
+    // FPS 計測
     this._fpsAccum = (this._fpsAccum || 0) + 1;
-    this._fpsTimer = (this._fpsTimer || 0) + dt;
+    this._fpsTimer = (this._fpsTimer || 0) + rawDt;
     if (this._fpsTimer >= 1.0) {
       this._fps = this._fpsAccum / this._fpsTimer;
       this._fpsAccum = 0;
       this._fpsTimer = 0;
-      // 自動軽量化: 30fps 未満が連続したらシャドウオフ
       if (this._fps < 28 && this.renderer && this.renderer.shadowMap.enabled && !this._autoLightApplied) {
         this.renderer.shadowMap.enabled = false;
         this._autoLightApplied = true;
         console.log('[perf] fps low (', this._fps.toFixed(1), '), disabling shadows');
       }
+    }
+    // シャドウ更新間引き: 動かない光源なので 4 フレに 1 回でOK
+    this._shadowFrame = (this._shadowFrame + 1) % 4;
+    if (this._shadowFrame === 0 && this.renderer.shadowMap.enabled) {
+      this.renderer.shadowMap.needsUpdate = true;
     }
     requestAnimationFrame(this._frame.bind(this));
   },
@@ -376,12 +401,10 @@ const Game = {
   update(dt) {
     Input.update(dt);
 
-    // カメラ切替リクエスト処理
     if (Input.consumeCameraToggle()) {
       this.toggleCameraMode();
     }
 
-    // コンボタイマー: 時間切れでリセット
     if (this.comboCount > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) {
@@ -390,33 +413,27 @@ const Game = {
       }
     }
 
-    // タイマー破損の保険
     if (!Number.isFinite(this.kickoffCountdown)) this.kickoffCountdown = 0;
     if (!Number.isFinite(this.goalAnimTimer)) this.goalAnimTimer = 0;
 
-    // ゴール演出中
     if (this.goalAnimTimer > 0) {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
         this.goalAnimTimer = 0;
-        // ホストもしくはソロのみキックオフリセットを実行 (クライアントは状態同期で受け取る)
         if (Net.isHost || !Net.peer) {
           this._kickoffReset();
         }
       }
     }
-    // キックオフ前カウントダウン中は車もボールも動かさない
     if (this.kickoffCountdown > 0) {
       const prev = this.kickoffCountdown;
       this.kickoffCountdown = Math.max(0, this.kickoffCountdown - dt);
-      // 0 になる直前に GO! を表示 (ゴール後の小カウントダウンのみ。初回は _showCountdown が表示)
-      // 初回キックオフは matchTime が 0 で、_showCountdown が裏で動いてるので重複させない
       if (prev > 0 && this.kickoffCountdown <= 0 && this.matchStarted && !this.matchEnded
           && this.matchTime > 0.5) {
         this._showMiniCountdown();
       }
     }
-    const playLocked = this.kickoffCountdown > 0 || this.goalAnimTimer > 0;
+    const playLocked = this.kickoffCountdown > 0 || this.goalAnimTimer > 0 || this.matchEnded;
 
     // タイマー
     if (this.matchStarted && !this.matchEnded && !playLocked) {
@@ -444,22 +461,25 @@ const Game = {
         boost: Input.boost,
         jump: Input.consumeJump(),
         airRoll: Input.airRoll,
+        handbrake: Input.handbrake,
       };
       this._lastLocalInput = inputState;
       this.localCar.update(dt, inputState);
-      // ジャンプSFX
       if (inputState.jump) {
         if (this.localCar.jumpsUsed === 1) SFX.jump();
         else { SFX.doubleJump(); SFX.flip && SFX.flip(); }
       }
+      if (inputState.handbrake && Math.abs(this.localCar.speed) > 12 && !this._slideSfxTimer) {
+        SFX.slide && SFX.slide();
+        this._slideSfxTimer = 0.35;
+      }
+      if (this._slideSfxTimer > 0) this._slideSfxTimer -= dt;
     } else if (this.localCar) {
-      // カウントダウン中はメッシュだけ更新 (空入力)
       this.localCar.update(dt, null);
     }
 
     // ===== オンライン処理 =====
     if (Net.peer && Net.isHost) {
-      // ホスト: 他クライアントの車を彼らの入力で
       for (const [id, car] of this.cars) {
         if (car === this.localCar) continue;
         if (playLocked) {
@@ -467,23 +487,19 @@ const Game = {
           continue;
         }
         let inp = this.remoteInputs.get(id);
-        if (!inp) inp = { steer: 0, accel: false, brake: false, boost: false, jump: false, airRoll: false };
+        if (!inp) inp = { steer: 0, accel: false, brake: false, boost: false, jump: false, airRoll: false, handbrake: false };
         car.update(dt, inp);
         if (inp.jump) inp.jump = false;
       }
-      // ボール物理
       if (!playLocked) {
         this.ball.update(dt);
-        // 衝突
         for (const car of this.cars.values()) {
           if (car.ballHitCooldown > 0) continue;
           const hitSp = this.ball.collideWithCar(car);
           if (hitSp > 0) this._onBallHit(car, hitSp);
         }
-        // 車同士の弱い衝突
         this._resolveCarVsCar();
 
-        // ゴール判定 (goalAnimTimer中は判定スキップで連続ゴール防止)
         if (this.goalAnimTimer <= 0) {
           const g = this.ball.checkGoal();
           if (g === 1) { this.scoreBlue += 1; this._onGoal('blue'); }
@@ -491,7 +507,6 @@ const Game = {
         }
       }
 
-      // 状態配信
       this._stateAccum += dt;
       if (this._stateAccum >= this._stateInterval) {
         this._stateAccum = 0;
@@ -517,7 +532,6 @@ const Game = {
         });
       }
     } else if (Net.peer && !Net.isHost) {
-      // クライアント: 入力をホストへ送信
       Net.sendToHost({ type: 'input', input: {
         steer: Input.steer,
         accel: Input.accel,
@@ -525,11 +539,10 @@ const Game = {
         boost: Input.boost,
         jump: this._lastLocalInput ? this._lastLocalInput.jump : false,
         airRoll: Input.airRoll,
+        handbrake: Input.handbrake,
       }});
-      // クライアントでもボールを軽く前進補間 (パケット間がカクつくのを防ぐ)
       if (!playLocked && this.ball) this.ball.clientPredict(dt);
     } else {
-      // ソロ: 自分でボール・Bot
       if (!playLocked) {
         this.ball.update(dt);
         for (const car of this.cars.values()) {
@@ -554,33 +567,38 @@ const Game = {
     }
 
     // カメラ
-    if (this.localCar) this._updateCamera(dt);
+    if (this.localCar) {
+      if (this.matchEnded && this._replayT > 0) {
+        this._updateReplayCamera(dt);
+        this._replayT -= dt;
+      } else {
+        this._updateCamera(dt);
+      }
+    }
 
     // HUD
     this._updateHUD();
 
-    // パッド演出
     Arena.updatePads(dt, performance.now());
-
-    // パッド取得SFX (差分検知)
     this._checkBoostPadSFX();
-
-    // パーティクル
     this._updateParticles(dt);
 
-    // パワーアップ更新: 全員アニメ実行、スポーン/判定はホストまたはソロのみ
-    // (PowerUps.update 自体がホストならスポーン、クライアントなら return で
-    //  アニメだけして接触判定をスキップする仕組みになっている)
     if (typeof PowerUps !== 'undefined') {
       if (!playLocked) PowerUps.update(dt);
+      // パワーアップ箱は試合終了中もアニメ続行
+      else if (this.matchEnded) {
+        for (const b of PowerUps.boxes) {
+          b.mesh.rotation.y += dt * 1.6;
+        }
+      }
     }
-    // 全車の有効パワー効果適用 (見た目はクライアントでもやりたい)
     if (typeof PowerUps !== 'undefined') {
       for (const car of this.cars.values()) PowerUps.applyEffects(car, dt);
       PowerUps.tickHUD();
     }
-    // ミニマップ
     if (typeof Minimap !== 'undefined') Minimap.draw();
+    // チャットバブル追従
+    if (typeof QuickChat !== 'undefined') QuickChat.tick();
   },
 
   _checkBoostPadSFX() {
@@ -596,17 +614,14 @@ const Game = {
       if (dx * dx + dz * dz < r2 * r2 + 1 && !p._sfxPlayed) {
         SFX.boostPad(p.big);
         p._sfxPlayed = true;
-        // 統計
         const s = this.stats.get(this.localCar.id);
         if (s) s.boostPads++;
-        // パッド復活時にリセット
         setTimeout(() => { p._sfxPlayed = false; }, (p.big ? 10000 : 4000));
         break;
       }
     }
   },
 
-  // 車同士の押し合い + デモリッション判定 (高速ブースト車が遅い車を吹き飛ばす)
   _resolveCarVsCar() {
     const list = Array.from(this.cars.values());
     for (let i = 0; i < list.length; i++) {
@@ -624,7 +639,6 @@ const Game = {
         const overlap = (minD - d) * 0.5;
         a.x -= nx * overlap; a.y -= ny * overlap; a.z -= nz * overlap;
         b.x += nx * overlap; b.y += ny * overlap; b.z += nz * overlap;
-        // 速度反発
         const rvx = b.vx - a.vx, rvy = b.vy - a.vy, rvz = b.vz - a.vz;
         const dot = rvx*nx + rvy*ny + rvz*nz;
         if (dot < 0) {
@@ -634,15 +648,15 @@ const Game = {
           if (Math.abs(dot) > 12) {
             SFX.thud(Math.min(1, Math.abs(dot) / 30));
           }
+          // PDCA6.7: 車同士の体当たりによるデモリッションは無効化済み (リモートPR #19)
+          // _demolish() メソッドは将来の機能 (例: アイテムによる爆発) のために残置
         }
       }
     }
   },
 
-  // 車をデモる (一定時間消失→自陣付近にリスポーン)
   _demolish(victim, attacker) {
     if (victim.respawnTimer > 0) return;
-    // シールドパワー所持者はデモ無効
     if (victim.activePower === 'shield') {
       this._spawnHitParticles(victim.x, victim.y + 1, victim.z, 30);
       SFX.boostPad(true);
@@ -652,9 +666,7 @@ const Game = {
     victim.respawnTimer = 3.0;
     victim.mesh.visible = false;
     SFX.ballSmash(1);
-    // 爆発エフェクト
     this._spawnGoalExplosion(victim.x, victim.y, victim.z, victim.team);
-    // 統計
     const sa = this.stats.get(attacker.id);
     const sv = this.stats.get(victim.id);
     if (sa) sa.demos++;
@@ -672,11 +684,13 @@ const Game = {
     else SFX.ballHit(Utils.clamp(hitSpeed / 40, 0.2, 1));
     if (car === this.localCar) {
       this.addCamShake(Utils.clamp(hitSpeed / 50, 0.1, 1.0));
-      // コンボ加算 (ローカル車だけ)
       this.comboCount++;
       this.comboTimer = this.COMBO_WINDOW;
       this._updateComboHUD();
       if (this.comboCount >= 2) SFX.combo(Math.min(this.comboCount, 6));
+      if (this.comboCount >= 4) {
+        showToast && showToast(`🔥 ${this.comboCount}x COMBO!`, 800);
+      }
     }
     this._spawnHitParticles(this.ball.x, this.ball.y, this.ball.z, hitSpeed);
   },
@@ -697,7 +711,7 @@ const Game = {
   },
 
   _spawnHitParticles(x, y, z, power) {
-    const count = Math.min(10, 3 + Math.floor(power / 8));
+    const count = Math.min(8, 3 + Math.floor(power / 10));
     for (let i = 0; i < count; i++) {
       const p = this._acquireParticle();
       if (!p) break;
@@ -740,15 +754,17 @@ const Game = {
     }
   },
 
-  // クライアント: ホスト状態の適用
   applyAuthState(state) {
     if (Net.isHost) return;
     if (state.cars) {
       for (const cs of state.cars) {
         const car = this.cars.get(cs.id);
         if (!car) continue;
+        // パワー状態同期 (ネット越し)
+        if (cs.power !== undefined && car.activePower !== cs.power) {
+          car.activePower = cs.power;
+        }
         if (car === this.localCar) {
-          // ローカル車は軽く補正のみ (リアル感保持)
           car.x = Utils.lerp(car.x, cs.x, 0.12);
           car.y = Utils.lerp(car.y, cs.y, 0.12);
           car.z = Utils.lerp(car.z, cs.z, 0.12);
@@ -779,10 +795,9 @@ const Game = {
 
   _onGoal(team) {
     this.goalAnimTimer = 1.4;
-    this._slowmoT = 0.7; // 0.7秒スローモーション
+    this._slowmoT = 0.7;
     this._lastSlowmoNow = performance.now();
     SFX.goal();
-    // ゴール時にコンボリセット (味方ゴールならスペシャル演出)
     const myTeam = this.localCar ? this.localCar.team : null;
     if (myTeam === team && this.comboCount >= 2) {
       showToast && showToast(`🌟 ${this.comboCount}x COMBO GOAL!`, 1600);
@@ -790,14 +805,12 @@ const Game = {
     this.comboCount = 0;
     this.comboTimer = 0;
     this._updateComboHUD();
-    // ゴール献身者検出 (ホストまたはソロのみ)
     if (Net.isHost || !Net.peer) {
       const scorerId = this.ball.lastHitter;
       const scorer = scorerId ? this.cars.get(scorerId) : null;
       if (scorer && scorer.team === team) {
         const ss = this.stats.get(scorer.id);
         if (ss) ss.goals++;
-        // アシスト判定 (ゴール前数秒以内に同チームが当てていればアシスト)
         if (this.ball.previousHitter && this.ball.previousHitter !== scorerId) {
           const prev = this.cars.get(this.ball.previousHitter);
           if (prev && prev.team === team) {
@@ -814,7 +827,6 @@ const Game = {
       if (myTeam && myTeam === team) label = '🔥 GOOOAL! 🔥';
       else if (myTeam) label = '😱 CONCEDED!';
       else label = (team === 'blue' ? '🔵 BLUE SCORES!' : '🟠 ORANGE SCORES!');
-      // スコアラー名を出す
       const scorerId = this.ball.lastHitter;
       const scorer = scorerId ? this.cars.get(scorerId) : null;
       if (scorer && scorer.team === team) {
@@ -826,7 +838,6 @@ const Game = {
       banner.classList.add('show');
       setTimeout(() => banner.classList.remove('show'), 1500);
     }
-    // ボール周囲に大規模パーティクル爆発
     this._spawnGoalExplosion(this.ball.x, this.ball.y, this.ball.z, team);
     this.addCamShake(0.9);
     document.getElementById('hud-score-blue').textContent = String(this.scoreBlue);
@@ -839,8 +850,7 @@ const Game = {
   _spawnGoalExplosion(x, y, z, team) {
     const baseColor = team === 'blue' ? 0x29b6f6 : 0xff7043;
     const accent    = 0xffeb3b;
-    // パーティクルプール残量に応じて最大粒数を制限 (軽量化)
-    const target = Math.min(30, this._particlePool.length - this._activeParticles.length);
+    const target = Math.min(24, this._particlePool.length - this._activeParticles.length);
     for (let i = 0; i < target; i++) {
       const p = this._acquireParticle();
       if (!p) break;
@@ -868,7 +878,6 @@ const Game = {
     if (Net.isHost) return;
     this.scoreBlue = info.blue;
     this.scoreOrange = info.orange;
-    // スコアラー情報を上書き (アシスト計算用)
     if (info.scorerId) this.ball.lastHitter = info.scorerId;
     this._onGoal(info.team);
   },
@@ -877,7 +886,6 @@ const Game = {
     if (Net.isHost) return;
     this.scoreBlue = info.blue;
     this.scoreOrange = info.orange;
-    // 統計を反映
     if (info.stats) {
       this.stats = new Map();
       for (const s of info.stats) this.stats.set(s.id, s);
@@ -911,24 +919,21 @@ const Game = {
         c.respawnTimer = 0;
         c.mesh.visible = true;
         c.boost = Math.max(c.boost, CarPhys.BOOST_INITIAL);
-        // パワーアップ解除
         c.activePower = null;
         c.powerTimer = 0;
         if (c._giantScale) { c.mesh.scale.set(1,1,1); c._giantScale = false; }
-        // 状態フラグもクリア
         c.isSupersonic = false;
         c.isFlipping = false;
+        c._flipTimer = 0;
         if (c._ssTrail) c._ssTrail.material.opacity = 0;
         c.syncMesh();
       });
     };
     resetTeam(blueList, -1);
     resetTeam(orgList, 1);
-    // パワーアップボックスもクリアして再スポーン待ち
     if (typeof PowerUps !== 'undefined') PowerUps.reset();
     this.kickoffCountdown = 0.8;
     if (typeof PowerUps !== 'undefined') PowerUps._renderIndicator();
-    // クライアントにキックオフリセット通知 (PowerUps クリア用)
     if (Net.isHost && typeof Net._broadcast === 'function') {
       Net._broadcast({ type: 'kickoffReset' });
     }
@@ -943,7 +948,6 @@ const Game = {
     let camX, camY, camZ, lookX, lookY, lookZ;
 
     if (this.cameraMode === 'ball') {
-      // ===== ボール視点: カメラは「車→ボール」方向に向いて配置 =====
       const dxb = this.ball.x - car.x;
       const dzb = this.ball.z - car.z;
       const dist = Math.sqrt(dxb*dxb + dzb*dzb);
@@ -952,7 +956,6 @@ const Game = {
         dirX = dxb / dist;
         dirZ = dzb / dist;
       } else {
-        // 接近時は車の向きを使う
         dirX = Math.sin(car.angle);
         dirZ = Math.cos(car.angle);
       }
@@ -964,12 +967,10 @@ const Game = {
       camZ = car.z - dirZ * dynBack;
       const airUp = car.onGround ? 0 : Math.min(8.0, (car.y - CarPhys.HEIGHT) * 0.2);
       camY = car.y + dynUp + airUp;
-      // ボールを注視
       lookX = this.ball.x;
       lookY = this.ball.y + 1.5;
       lookZ = this.ball.z;
     } else {
-      // ===== 通常チェイス視点 =====
       const baseBack = 21.0;
       const baseUp   = 9.0;
       const dynBack = baseBack + speedRatio * 8.0 + boostRatio * 5.0;
@@ -979,7 +980,6 @@ const Game = {
       camZ = car.z - Math.cos(car.angle) * dynBack;
       camY = car.y + dynUp + airUp;
 
-      // ボールトラッキング (車の進行方向+ボール方向ブレンド)
       const dxb = this.ball.x - car.x;
       const dzb = this.ball.z - car.z;
       const distBall = Math.sqrt(dxb*dxb + dzb*dzb);
@@ -1004,7 +1004,6 @@ const Game = {
       }
     }
 
-    // 視点切替時に急に飛ばないよう、補間係数は速度に応じて
     const alpha = Utils.clamp(0.18 + speedRatio * 0.18, 0.18, 0.38);
     this.camera.position.x = Utils.lerp(this.camera.position.x, camX, alpha);
     this.camera.position.y = Utils.lerp(this.camera.position.y, camY, alpha);
@@ -1032,6 +1031,24 @@ const Game = {
       this.camera.position.z += (Math.random() - 0.5) * s;
       this._camShake = Math.max(0, this._camShake - dt * 6);
     }
+  },
+
+  // 試合終了時のリプレイ風カメラ: ボールを高めから見下ろし
+  _updateReplayCamera(dt) {
+    const ball = this.ball;
+    const t = (2.5 - this._replayT) / 2.5; // 0 → 1
+    const angle = t * Math.PI * 0.7;
+    const radius = 130 - t * 40;
+    const height = 60 - t * 20;
+    const camX = ball.x + Math.sin(angle) * radius;
+    const camZ = ball.z + Math.cos(angle) * radius;
+    const camY = ball.y + height;
+    this.camera.position.x = Utils.lerp(this.camera.position.x, camX, 0.1);
+    this.camera.position.y = Utils.lerp(this.camera.position.y, camY, 0.1);
+    this.camera.position.z = Utils.lerp(this.camera.position.z, camZ, 0.1);
+    this.camera.lookAt(ball.x, ball.y + 4, ball.z);
+    this.camera.fov = Utils.lerp(this.camera.fov, 60, 0.08);
+    this.camera.updateProjectionMatrix();
   },
 
   addCamShake(power) {
@@ -1062,10 +1079,8 @@ const Game = {
       sv.classList.toggle('supersonic', !!car.isSupersonic);
     }
 
-    // スーパーソニックインジケータ
     const ssEl = document.getElementById('supersonic-indicator');
     if (ssEl) ssEl.classList.toggle('show', !!car.isSupersonic);
-    // 発動時のSFX (エッジ検知)
     if (car.isSupersonic && !this._lastSupersonic) {
       SFX.supersonic && SFX.supersonic();
     }
@@ -1082,18 +1097,14 @@ const Game = {
       arrow.classList.toggle('brake', !!Input.brake);
     }
 
-    // ボール方向インジケーター (画面外のとき、画面端で矢印)
     this._updateBallIndicator();
   },
 
-  // 画面外のボールへの矢印を画面端に出す
   _updateBallIndicator() {
     const el = document.getElementById('ball-indicator');
     if (!el || !this.ball || !this.camera) return;
-    // ボールの3D位置をスクリーンに投影
     const v = new THREE.Vector3(this.ball.x, this.ball.y, this.ball.z);
     const camPos = this.camera.position;
-    // カメラより手前にあるかチェック
     const camFwd = new THREE.Vector3();
     this.camera.getWorldDirection(camFwd);
     const toBall = new THREE.Vector3(v.x - camPos.x, v.y - camPos.y, v.z - camPos.z);
@@ -1103,7 +1114,6 @@ const Game = {
     const H = window.innerHeight;
     const sx = (v.x * 0.5 + 0.5) * W;
     const sy = (-v.y * 0.5 + 0.5) * H;
-    // ボールが画面内に十分入っているなら矢印は不要
     const onScreen = fwdDot > 0 && sx > 80 && sx < W - 80 && sy > 80 && sy < H - 120;
     const dist = Math.sqrt(
       (this.ball.x - this.localCar.x) ** 2 +
@@ -1113,23 +1123,18 @@ const Game = {
       el.classList.remove('show');
       return;
     }
-    // 画面の中心から、ボール方向に向けてエッジに矢印を置く
     const cx = W / 2, cy = H / 2;
     let dx = sx - cx, dy = sy - cy;
     if (fwdDot < 0) {
-      // 後ろ側にある: 強制的に画面下に出す
       dx = -dx; dy = Math.abs(dy);
       if (dy < 60) dy = 60;
     }
     const mag = Math.sqrt(dx*dx + dy*dy) || 1;
-    // 画面端の安全マージン
     const marginX = 70, marginY = 90;
     const maxX = W / 2 - marginX;
     const maxY = H / 2 - marginY;
-    // 矢印位置を画面端にクランプ
     const sxNorm = dx / mag;
     const syNorm = dy / mag;
-    // 端まで延ばす倍率
     const tX = Math.abs(sxNorm) > 0.001 ? maxX / Math.abs(sxNorm) : Infinity;
     const tY = Math.abs(syNorm) > 0.001 ? maxY / Math.abs(syNorm) : Infinity;
     const t = Math.min(tX, tY);
@@ -1152,7 +1157,6 @@ const Game = {
   _botUpdate(car, dt) {
     if (car.respawnTimer > 0) { car.update(dt, null); return; }
 
-    // 難易度パラメータ
     const diff = this.botDifficulty || 'normal';
     const skill = diff === 'easy' ? 0.55 : (diff === 'hard' ? 1.2 : 1.0);
 
@@ -1161,7 +1165,6 @@ const Game = {
     const ball = this.ball;
     const distToBall = Math.hypot(ball.x - car.x, ball.z - car.z);
 
-    // 同チームの他Bot/プレイヤーよりボールに近いか?
     let isClosest = true;
     let closestDist = distToBall;
     for (const other of this.cars.values()) {
@@ -1177,7 +1180,6 @@ const Game = {
     const ballHeadingOwn = (ownGoalZ < 0 && ball.vz < -2) || (ownGoalZ > 0 && ball.vz > 2);
     const emergencyDefense = ballDistOwn < 32 && ballHeadingOwn;
 
-    // 危険な敵が自陣ボール近くに居るか? (ハード難易度はマーキング意識)
     let dangerEnemy = null;
     if (diff !== 'easy') {
       let dmin = 999;
@@ -1191,14 +1193,23 @@ const Game = {
     let targetX, targetZ;
     let wantBoost = false;
     let wantJump  = false;
+    let wantHandbrake = false;
 
-    // ボール予測位置 (Hard では先読み)
     const predictT = diff === 'hard' ? 0.45 : (diff === 'normal' ? 0.22 : 0.05);
     const predX = ball.x + ball.vx * predictT;
     const predZ = ball.z + ball.vz * predictT;
 
+    // === 近くにパワーアップ箱があれば取りに行く (Normal/Hardのみ) ===
+    let nearPowerup = null;
+    if (diff !== 'easy' && typeof PowerUps !== 'undefined' && PowerUps.boxes && !car.activePower) {
+      let bestD = 60;
+      for (const b of PowerUps.boxes) {
+        const d = Math.hypot(b.x - car.x, b.z - car.z);
+        if (d < bestD) { bestD = d; nearPowerup = b; }
+      }
+    }
+
     if (emergencyDefense || (!isClosest && ballDistOwn < 42)) {
-      // 守備
       const t = 0.55;
       targetX = Utils.clamp(ball.x * (1 - t), -Arena.GOAL_W / 2 - 4, Arena.GOAL_W / 2 + 4);
       targetZ = ownGoalZ * t + ball.z * (1 - t);
@@ -1208,8 +1219,6 @@ const Game = {
         wantBoost = car.boost > 25 && diff !== 'easy';
       }
     } else if (isClosest) {
-      // 攻撃: ボールの「敵ゴール反対側」に回り込んでから敵ゴール方向に打つ
-      // ボール予測位置→敵ゴール中央のベクトル
       const bgx = 0 - predX;
       const bgz = enemyGoalZ - predZ;
       const bgLen = Math.hypot(bgx, bgz) || 1;
@@ -1218,18 +1227,19 @@ const Game = {
       targetX = predX - bgnx * approachDist;
       targetZ = predZ - bgnz * approachDist;
       if (distToBall < 8) {
-        // 接触圏内: ボールを敵ゴール中央方向に押す
         targetX = ball.x + bgnx * 4;
         targetZ = ball.z + bgnz * 6;
         wantBoost = car.boost > 30 && diff !== 'easy';
       } else if (distToBall < 35) {
         wantBoost = car.boost > 40 * (diff === 'easy' ? 1.5 : 1);
       }
+    } else if (nearPowerup && car.boost > 25) {
+      // パワーアップ獲りに行く
+      targetX = nearPowerup.x;
+      targetZ = nearPowerup.z;
+      if (Math.hypot(targetX - car.x, targetZ - car.z) < 20) wantBoost = car.boost > 50;
     } else {
-      // サポート
-      // 敵が居るならマーキング (ハードのみ)、それ以外は敵ゴール側に待機 + ブーストパッド集め
       if (dangerEnemy && diff === 'hard') {
-        // 敵とゴールの間に位置取り
         const ex = dangerEnemy.x, ez = dangerEnemy.z;
         targetX = (ex + 0) / 2;
         targetZ = (ez + ownGoalZ) / 2;
@@ -1243,7 +1253,6 @@ const Game = {
           if (!p.active) continue;
           if (!p.big && car.boost > 40) continue;
           const d = Math.hypot(p.x - car.x, p.z - car.z);
-          // ペナルティ: 敵陣すぎるパッドは取らない
           const oneOwnSide = (p.z * (ownGoalZ < 0 ? 1 : -1)) > -10;
           if (oneOwnSide && d < bestD && d < 50) { bestPad = p; bestD = d; }
         }
@@ -1251,7 +1260,6 @@ const Game = {
       }
     }
 
-    // ステアリング (難易度で精度ノイズ)
     const noise = (diff === 'easy' ? 0.45 : (diff === 'hard' ? 0.06 : 0.16)) * (Math.random() - 0.5);
     const dx = targetX - car.x;
     const dz = targetZ - car.z;
@@ -1263,8 +1271,11 @@ const Game = {
     const steer = Utils.clamp(da * 2.4 * skill, -1, 1);
 
     let brake = (Math.abs(da) > Math.PI * 0.72 && dist < 9);
+    // Hard Botはタイトコーナーでハンドブレーキ
+    if (diff === 'hard' && Math.abs(da) > Math.PI * 0.55 && Math.abs(car.speed) > 40 && dist < 25) {
+      wantHandbrake = true;
+    }
 
-    // エアプレー
     const jumpChance = diff === 'easy' ? 0.12 : (diff === 'hard' ? 0.78 : 0.5);
     if (ball.y > 8 && distToBall < 15 && car.onGround && Math.random() < jumpChance) {
       wantJump = true;
@@ -1273,15 +1284,16 @@ const Game = {
       wantJump = true;
     }
 
-    // キックオフ突撃
     if (this.matchTime < 1.2 && isClosest) { wantBoost = true; brake = false; }
 
-    // デモリッション狙い (Hard のみ、自陣で危険な敵が居て自分は守備でない時)
+    // ターボ取得中はガンガン突っ込む
+    if (car.activePower === 'turbo' || car.activePower === 'giant') {
+      wantBoost = true;
+    }
+
     if (diff === 'hard' && dangerEnemy && !isClosest && car.boost > 60) {
       const dToEnemy = Math.hypot(dangerEnemy.x - car.x, dangerEnemy.z - car.z);
-      // 後ろから接近できる時のみ
       if (dToEnemy < 50 && dToEnemy > 12) {
-        // 敵への角度
         const eda = Math.atan2(dangerEnemy.x - car.x, dangerEnemy.z - car.z) - car.angle;
         let edaN = eda;
         while (edaN > Math.PI) edaN -= Math.PI * 2;
@@ -1294,9 +1306,10 @@ const Game = {
       steer,
       accel: true,
       brake,
-      boost: wantBoost && car.boost > 5 && Math.abs(da) < 0.6,
+      boost: wantBoost && (car.boost > 5 || car.activePower === 'turbo') && Math.abs(da) < 0.6,
       jump: wantJump,
       airRoll: false,
+      handbrake: wantHandbrake,
     });
   },
 };
@@ -1322,18 +1335,14 @@ if (typeof Net !== 'undefined') {
     car.activePower = data.kind;
     car.powerTimer = meta.dur;
     if (car === Game.localCar) PowerUps._renderIndicator();
-    // クライアント側の見た目同期: 取られたボックスを消す
     if (data.boxId) PowerUps.applyRemoteTake(data.boxId);
   });
-  // クライアント: ホストからのスポーン通知
   Net.on('powerupSpawn', (data) => {
     if (typeof PowerUps !== 'undefined') PowerUps.applyRemoteSpawn(data);
   });
-  // クライアント: ホストからのキックオフリセット通知
   Net.on('kickoffReset', () => {
     if (Net.isHost) return;
     if (typeof PowerUps !== 'undefined') PowerUps.reset();
-    // 各車のパワー状態もクリア
     for (const car of Game.cars.values()) {
       car.activePower = null;
       car.powerTimer = 0;

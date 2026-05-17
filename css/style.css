@@ -606,11 +606,33 @@ input { font: inherit; }
   opacity: 1;
 }
 
+/* HANDBRAKE (DRIFT) ボタン: 画面中央下、両親指で押せる位置 */
+.ctrl-handbrake {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  width: 76px;
+  height: 76px;
+  font-size: 11px;
+  background: radial-gradient(circle at 35% 35%, rgba(255,235,59,0.95), rgba(255,179,0,0.9) 60%, rgba(150,90,0,0.9));
+  border-color: rgba(255,255,255,0.6);
+  box-shadow: 0 0 20px rgba(255,179,0,0.65), inset 0 -4px 10px rgba(0,0,0,0.3);
+  opacity: 0.85;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+.ctrl-handbrake:active, .ctrl-handbrake.pressed {
+  box-shadow: 0 0 32px rgba(255,235,59,1), inset 0 -2px 6px rgba(0,0,0,0.3);
+  opacity: 1;
+  transform: translateX(-50%) scale(0.92);
+}
+
 /* 横画面が小さいスマホ用 */
 @media (orientation: landscape) and (max-height: 420px) {
   .ctrl-jump, .ctrl-accel { width: 90px; height: 90px; font-size: 13px; bottom: 14px; }
   .ctrl-boost { width: 64px; height: 64px; font-size: 11px; bottom: 50px; right: calc(max(20px, env(safe-area-inset-right, 20px)) + 96px); }
   .ctrl-airroll { width: 64px; height: 64px; font-size: 10px; bottom: 50px; left: calc(max(20px, env(safe-area-inset-left, 20px)) + 96px); }
+  .ctrl-handbrake { width: 60px; height: 60px; font-size: 10px; bottom: 10px; }
 }
 
 /* ボール方向インジケーター (画面端) */
@@ -653,7 +675,7 @@ input { font: inherit; }
 /* コンボメーター */
 .combo-meter {
   position: absolute;
-  top: 76px;
+  top: 110px;
   left: 12px;
   padding: 5px 10px 5px 12px;
   background: linear-gradient(90deg, rgba(255,87,34,0.85), rgba(255,193,7,0.85));
@@ -735,10 +757,10 @@ input { font: inherit; }
 /* ===== クイックチャット ===== */
 .quickchat-btn {
   position: absolute;
-  bottom: 160px;
-  right: 22px;
-  width: 46px;
-  height: 46px;
+  top: 8px;
+  left: 8px;
+  width: 44px;
+  height: 44px;
   font-size: 20px;
   border-radius: 50%;
   background: rgba(0,0,0,0.6);
@@ -749,13 +771,13 @@ input { font: inherit; }
 }
 .quickchat-btn:active { background: rgba(255,255,255,0.2); }
 @media (orientation: landscape) and (max-height: 420px) {
-  .quickchat-btn { width: 38px; height: 38px; font-size: 16px; bottom: 122px; right: 18px; }
+  .quickchat-btn { width: 36px; height: 36px; font-size: 16px; top: 6px; left: 6px; }
 }
 
 .quickchat-menu {
   position: absolute;
-  bottom: 210px;
-  right: 70px;
+  top: 60px;
+  left: 8px;
   display: none;
   flex-direction: column;
   gap: 4px;
@@ -781,9 +803,7 @@ input { font: inherit; }
 
 #quickchat-bubbles {
   position: absolute;
-  top: 200px;
-  left: 0;
-  right: 0;
+  inset: 0;
   pointer-events: none;
   z-index: 20;
 }
@@ -796,23 +816,25 @@ input { font: inherit; }
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
-  animation: bubblePop 2.4s ease-out forwards;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  /* 位置は JS で left/top に設定。中央寄せは translate で */
+  transform: translate(-50%, -100%);
+  animation: bubblePop 2.4s ease-out forwards;
 }
 @keyframes bubblePop {
-  0% { transform: translate(-50%, 12px) scale(0.5); opacity: 0; }
-  10% { transform: translate(-50%, 0) scale(1.1); opacity: 1; }
-  20% { transform: translate(-50%, 0) scale(1); opacity: 1; }
-  85% { transform: translate(-50%, -8px) scale(1); opacity: 1; }
-  100% { transform: translate(-50%, -32px) scale(0.8); opacity: 0; }
+  0%   { opacity: 0; transform: translate(-50%, calc(-100% + 12px)) scale(0.5); }
+  10%  { opacity: 1; transform: translate(-50%, -100%) scale(1.1); }
+  20%  { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+  85%  { opacity: 1; transform: translate(-50%, calc(-100% - 8px)) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, calc(-100% - 32px)) scale(0.8); }
 }
 
 /* パワーアップ表示 */
 .powerup-indicator {
   position: absolute;
-  top: 56px;
-  left: 12px;
+  top: 14px;
+  left: 60px;
   display: flex;
   gap: 6px;
   z-index: 14;
@@ -880,7 +902,21 @@ input { font: inherit; }
   align-items: center;
   gap: 8px;
 }
-#sens-slider, #sens-curve { flex: 1; }
+#sens-slider, #sens-curve, #vol-slider { flex: 1; }
+.sens-presets { gap: 4px; flex-wrap: wrap; }
+.sens-presets label { min-width: 60px; }
+.preset-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+}
+.preset-btn:active { background: rgba(79,195,247,0.3); border-color: #29b6f6; }
 .invert-lbl { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .btn-mini-wide {
   width: 100%;
@@ -923,6 +959,13 @@ input { font: inherit; }
   margin: 10px 0 12px;
   color: #ffa726;
 }
+.finish-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.finish-buttons .btn { width: 100%; }
 
 /* ゲーム終了画面の統計 */
 .finish-stats {

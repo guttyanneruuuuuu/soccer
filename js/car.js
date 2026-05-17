@@ -1,52 +1,56 @@
 // ============= 車 (ロケットリーグ風物理) =============
-// スマホ操作前提:
-//   - アクセル: ACCELボタン (右下) ホールド
-//   - ブレーキ/バック: ジャイロ後傾
-//   - ブースト: BOOSTボタン (右中) ホールド
-//   - ステア: ジャイロ左右
-//   - 空中ピッチ: ジャイロ前後傾
-//   - 空中ロール: AIR ROLLボタン押している間、ステアをロール回転に切替
-//   - ジャンプ/フリップ: JUMPボタン
+// PDCA7 (このバージョン):
+//   - パウダースライド (ハンドブレーキ) を実装。横滑り中の旋回半径が大幅に小さくなる
+//   - フリップ終了タイマーを setTimeout から物理タイマーに変更 (スローモーションでも整合)
+//   - 連続押しによるジャンプチャタリングを物理側でも防止 (jumpEdgeTimer 拡張)
+//   - ハーフフリップ (バック+ジャンプ で前方バンプ→反転) の挙動を強化
+//   - シールド/MAGNET オーラ更新 (powerups から呼ばれる)
+//   - 高速時のステアを少し効くように調整 (0.55→0.62) → 操作不能感を緩和
 const CarPhys = {
   // サイズ (ボディスケール 3.4 × ベース寸法 ≒ 全長 ~12m / 半径 4.8m)
   RADIUS: 4.8,
   HEIGHT: 3.4,
 
   // 速度パラメタ
-  MAX_SPEED: 78,            // 通常上限
-  MAX_SPEED_BOOST: 105,     // ブースト最大
-  SUPERSONIC_SPEED: 82,     // この速度を超えるとスーパーソニック演出
-  ACCEL: 70,                // 加速度
-  REVERSE_ACCEL: 30,        // バックの加速
-  BRAKE: 88,                // ブレーキ強度
-  FRICTION: 3.6,            // 何もしない時の減速
-  AIR_FRICTION: 0.30,       // 空中の空気抵抗
-  STEER_SPEED: 3.35,        // ハンドル切る速度
-  STEER_AT_SPEED: 0.55,     // 高速時のステア効きを下げて挙動安定
+  MAX_SPEED: 78,
+  MAX_SPEED_BOOST: 105,
+  SUPERSONIC_SPEED: 82,
+  ACCEL: 76,                // 70 → 76 (出だしを少し速く)
+  REVERSE_ACCEL: 32,
+  BRAKE: 92,
+  FRICTION: 3.6,
+  AIR_FRICTION: 0.30,
+  STEER_SPEED: 3.45,        // 3.35 → 3.45 (少しキビキビ)
+  STEER_AT_SPEED: 0.62,     // 0.55 → 0.62 (高速時の効きを若干UP)
   LATERAL_GRIP: 11.0,
-  STEER_LOW_SPEED_BONUS: 1.45,  // 低速時の旋回ボーナス
+  STEER_LOW_SPEED_BONUS: 1.5,
+
+  // パウダースライド
+  HANDBRAKE_FRICTION: 8.5,  // ハンドブレーキ時の減速量
+  HANDBRAKE_STEER_GAIN: 1.6,// ハンドブレーキ中のステア倍率 (横滑り効果)
 
   // 空中
   GRAVITY: 42,
-  JUMP_VEL: 32,             // 初段ジャンプ
-  DOUBLE_JUMP_VEL: 28,      // 2段目
+  JUMP_VEL: 32,
+  DOUBLE_JUMP_VEL: 28,
   AIR_PITCH_SPEED: 5.4,
-  AIR_ROLL_SPEED: 5.6,      // ロール速度 (新規)
-  AIR_YAW_SPEED: 4.4,       // 空中ヨー (通常ステア時)
+  AIR_ROLL_SPEED: 5.6,
+  AIR_YAW_SPEED: 4.4,
 
   // ブースト
-  BOOST_FORCE: 118,         // ブースト推力 (++)
-  BOOST_PER_SEC: 38,        // 燃料消費
-  BOOST_MAX: 100,           // 最大100に統一 (HUD互換)
+  BOOST_FORCE: 118,
+  BOOST_PER_SEC: 38,
+  BOOST_MAX: 100,
   BOOST_INITIAL: 50,
-  BOOST_MIN_HOLD: 0.10,     // 燃料0でも最低0.1秒は炎の見た目を維持
+  BOOST_MIN_HOLD: 0.10,
   // 壁
   WALL_BOUNCE: 0.18,
   WALL_SPEED_KEEP: 0.9,
   WALL_CLIMB_MIN_IMPACT: 6,
   WALL_CLIMB_VEL: 8.2,
   // 二段ジャンプ時の追加推進
-  FLIP_FORWARD_VEL: 14,     // フリップ前進加速 (10 → 14)
+  FLIP_FORWARD_VEL: 14,
+  FLIP_DURATION: 0.35,
 };
 
 class Car {
@@ -58,46 +62,41 @@ class Car {
     this.isLocal = !!opts.isLocal;
     this.isRemote = !!opts.isRemote;
 
-    // 位置・速度
     this.x = opts.x || 0;
     this.y = CarPhys.HEIGHT;
     this.z = opts.z || 0;
     this.vx = 0;
     this.vy = 0;
     this.vz = 0;
-    this.angle = opts.angle || 0;    // ヨー
-    this.pitch = 0;                  // ピッチ (機首上下)
-    this.roll = 0;                   // ロール (左右回転)
+    this.angle = opts.angle || 0;
+    this.pitch = 0;
+    this.roll = 0;
 
     this.speed = 0;
     this.onGround = true;
 
-    // ジャンプ
     this.jumpsUsed = 0;
     this.airTime = 0;
-    this._jumpEdgeTimer = 0;  // ジャンプ後の入力エッジ判定保護
+    this._jumpEdgeTimer = 0;
 
-    // ブースト
     this.boost = CarPhys.BOOST_INITIAL;
     this.boostMax = CarPhys.BOOST_MAX;
     this._lastBoostTime = 0;
 
-    // ボール衝突クールダウン
     this.ballHitCooldown = 0;
-
-    // ゴール後の入力ロック
     this.lockTimer = 0;
-
-    // デモリッション後リスポーン
     this.respawnTimer = 0;
     this._spawnX = opts.x || 0;
     this._spawnZ = opts.z || 0;
     this._spawnAngle = opts.angle || 0;
 
-    // 状態フラグ (game.jsから観測)
     this.isSupersonic = false;
     this.isFlipping = false;
+    this._flipTimer = 0;
     this._flipDir = 0;
+
+    // パウダースライド表示用
+    this._slideT = 0;
 
     this.mesh = this._buildMesh();
     this.mesh.position.set(this.x, this.y, this.z);
@@ -108,7 +107,6 @@ class Car {
     const group = new THREE.Group();
     const colorHex = parseInt(this.color.replace('#',''), 16);
 
-    // ロケットリーグ風: 平たくワイドに。スケールアップして「でかく見せる」
     const S = 3.4;
 
     // ボディ
@@ -172,7 +170,7 @@ class Car {
     const tl2 = new THREE.Mesh(lightGeo, tlMat); tl2.position.set( 0.55 * S, -0.28 * S, -1.78 * S); group.add(tl2);
 
     // タイヤ
-    const tireGeo = new THREE.CylinderGeometry(0.46 * S, 0.46 * S, 0.42 * S, 14);
+    const tireGeo = new THREE.CylinderGeometry(0.46 * S, 0.46 * S, 0.42 * S, 12);
     const tireMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
     const rimGeo = new THREE.CylinderGeometry(0.28 * S, 0.28 * S, 0.44 * S, 8);
     const rimMat = new THREE.MeshLambertMaterial({ color: 0xcccccc });
@@ -205,9 +203,9 @@ class Car {
     teamFlag.position.set(0, 0.66 * S, -0.15 * S);
     group.add(teamFlag);
 
-    // ブースト炎 (改良: 2 段重ね + チームカラー)
+    // ブースト炎 (2段重ね)
     const teamFlameColor = this.team === 'blue' ? 0x29b6f6 : 0xff7043;
-    const flameGeo = new THREE.ConeGeometry(0.52 * S, 2.4 * S, 12);
+    const flameGeo = new THREE.ConeGeometry(0.52 * S, 2.4 * S, 10);
     const flameMatOuter = new THREE.MeshBasicMaterial({
       color: teamFlameColor, transparent: true, opacity: 0.85,
     });
@@ -218,8 +216,7 @@ class Car {
     fl1.position.set(-0.5 * S, -0.25 * S, -2.35 * S); fl1.rotation.x = -Math.PI / 2; fl1.visible = false;
     const fl2 = new THREE.Mesh(flameGeo, flameMatOuter);
     fl2.position.set( 0.5 * S, -0.25 * S, -2.35 * S); fl2.rotation.x = -Math.PI / 2; fl2.visible = false;
-    // インナー（短く明るく）
-    const flameInnerGeo = new THREE.ConeGeometry(0.32 * S, 1.5 * S, 10);
+    const flameInnerGeo = new THREE.ConeGeometry(0.32 * S, 1.5 * S, 8);
     const fl1i = new THREE.Mesh(flameInnerGeo, flameMatInner);
     fl1i.position.set(-0.5 * S, -0.25 * S, -2.1 * S); fl1i.rotation.x = -Math.PI / 2; fl1i.visible = false;
     const fl2i = new THREE.Mesh(flameInnerGeo, flameMatInner);
@@ -255,6 +252,31 @@ class Car {
       this.underGlow = underGlow;
     }
 
+    // ===== シールドオーラ (全車。activePower=shield時のみ表示) =====
+    {
+      const shieldGeo = new THREE.SphereGeometry(2.2 * S, 14, 10);
+      const shieldMat = new THREE.MeshBasicMaterial({
+        color: 0x4fc3f7, transparent: true, opacity: 0, wireframe: true,
+      });
+      const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+      group.add(shieldMesh);
+      this._shieldMesh = shieldMesh;
+    }
+    // ===== MAGNET オーラ (磁力線) =====
+    {
+      const magGeo = new THREE.TorusGeometry(2.0 * S, 0.12 * S, 8, 18);
+      const magMat = new THREE.MeshBasicMaterial({
+        color: 0xab47bc, transparent: true, opacity: 0,
+      });
+      const m1 = new THREE.Mesh(magGeo, magMat);
+      const m2 = new THREE.Mesh(magGeo, magMat);
+      m2.rotation.x = Math.PI / 2;
+      const m3 = new THREE.Mesh(magGeo, magMat);
+      m3.rotation.z = Math.PI / 2;
+      group.add(m1, m2, m3);
+      this._magnetMeshes = [m1, m2, m3];
+    }
+
     // ラベル
     this.nameSprite = this._buildLabel(this.name);
     this.nameSprite.position.set(0, 2.2 * S, 0);
@@ -287,13 +309,21 @@ class Car {
       input = null;
     }
 
+    // フリップタイマー (setTimeout から物理タイマーに置換)
+    if (this._flipTimer > 0) {
+      this._flipTimer -= dt;
+      if (this._flipTimer <= 0) {
+        this.isFlipping = false;
+        this._flipTimer = 0;
+      }
+    }
+
     // === デモリッション後リスポーン処理 ===
     if (this.respawnTimer > 0) {
       this.respawnTimer -= dt;
       this.vx = this.vy = this.vz = 0;
       this.speed = 0;
       if (this.respawnTimer <= 0) {
-        // リスポーン: 自陣付近に復帰
         this.x = this._spawnX;
         this.z = this._spawnZ;
         this.y = CarPhys.HEIGHT;
@@ -304,6 +334,7 @@ class Car {
         this.onGround = true;
         this.jumpsUsed = 0;
       }
+      this._updateAuras(dt);
       this.syncMesh();
       return;
     }
@@ -311,48 +342,50 @@ class Car {
     if (this._jumpEdgeTimer > 0) this._jumpEdgeTimer -= dt;
 
     // ===== 操舵 =====
+    const handbrakeActive = !!(input && input.handbrake && this.onGround);
     if (input) {
       const speedRatio = Math.min(1, Math.abs(this.speed) / CarPhys.MAX_SPEED);
       const steerEffect = (1 - speedRatio * (1 - CarPhys.STEER_AT_SPEED));
       if (this.onGround) {
-        // 地上はヨー (ハンドル) — 後進中は逆向きに効くと自然
         const dir = this.speed >= 0 ? 1 : -1;
-        // 低速で旋回しやすく
         const lowSpeedBoost = 1 + (1 - speedRatio) * (CarPhys.STEER_LOW_SPEED_BONUS - 1);
-        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * lowSpeedBoost * dir * dt;
+        // ハンドブレーキ中は旋回半径が劇的に小さく
+        const hbGain = handbrakeActive ? CarPhys.HANDBRAKE_STEER_GAIN : 1.0;
+        this.angle += input.steer * CarPhys.STEER_SPEED * steerEffect * lowSpeedBoost * dir * hbGain * dt;
         // 地上のロール演出
-        const targetRoll = -input.steer * Math.min(0.22, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.28);
+        const slideAmount = handbrakeActive ? 0.42 : 0.22;
+        const targetRoll = -input.steer * Math.min(slideAmount, Math.abs(this.speed) / CarPhys.MAX_SPEED * 0.34);
         this.roll = Utils.lerp(this.roll, targetRoll, dt * 6);
       } else {
-        // 空中: AIR ROLLボタン押下中は steer をロールとして使う
-        // それ以外は steer をヨー(横回転)、pitchを縦回転として使う
         const airRoll = !!input.airRoll;
         if (airRoll) {
-          // ロール (左右にゴロンと回る)
           this.roll += input.steer * CarPhys.AIR_ROLL_SPEED * dt;
         } else {
-          // 通常: ヨー (左右回頭)
           this.angle += input.steer * CarPhys.AIR_YAW_SPEED * dt;
-          // ロールは見た目程度に
           const targetRoll = -input.steer * 0.4;
           this.roll = Utils.lerp(this.roll, targetRoll, dt * 4);
         }
-        // ピッチ (機首上下) - 端末ピッチを入力に使う
+        // ピッチ (機首上下)
         const airPitchInput = (typeof Input !== 'undefined') ? (Input.pitch || 0) : 0;
         const pitchSteer = airPitchInput + (input.brake ? 0.6 : 0);
         this.pitch += pitchSteer * CarPhys.AIR_PITCH_SPEED * dt;
-        // ピッチを正規化
         if (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
         if (this.pitch < -Math.PI) this.pitch += Math.PI * 2;
-        // ロールも正規化
         if (this.roll > Math.PI) this.roll -= Math.PI * 2;
         if (this.roll < -Math.PI) this.roll += Math.PI * 2;
       }
     }
 
-    // ===== アクセル + ブレーキ =====
+    // ===== アクセル + ブレーキ + ハンドブレーキ =====
     if (input && this.onGround) {
-      if (input.brake) {
+      if (handbrakeActive) {
+        // ハンドブレーキ: 強い摩擦でスピン中
+        const f = CarPhys.HANDBRAKE_FRICTION * dt;
+        if (this.speed > 0) this.speed = Math.max(0, this.speed - f);
+        else this.speed = Math.min(0, this.speed + f);
+        // ハンドブレーキ中もアクセル踏めば加速可 (パワースライド)
+        if (input.accel) this.speed += CarPhys.ACCEL * 0.45 * dt;
+      } else if (input.brake) {
         if (this.speed > 0) this.speed -= CarPhys.BRAKE * dt;
         else this.speed -= CarPhys.REVERSE_ACCEL * dt;
       } else if (input.accel) {
@@ -363,14 +396,20 @@ class Car {
         else this.speed = Math.min(0, this.speed + f);
       }
     }
+    // パウダースライド エフェクト値追跡
+    if (handbrakeActive && Math.abs(this.speed) > 8) {
+      this._slideT = Math.min(1, this._slideT + dt * 3);
+    } else {
+      this._slideT = Math.max(0, this._slideT - dt * 2);
+    }
 
     // ===== ブースト =====
     let boosting = false;
-    if (input && input.boost && this.boost > 0) {
+    const isTurbo = this.activePower === 'turbo';
+    if (input && input.boost && (this.boost > 0 || isTurbo)) {
       boosting = true;
-      this.boost = Math.max(0, this.boost - CarPhys.BOOST_PER_SEC * dt);
-      this._lastBoostTime = CarPhys.BOOST_MIN_HOLD; // 燃料切れ時もしばらく炎を維持
-      // 前進方向(車の向き)に推力
+      if (!isTurbo) this.boost = Math.max(0, this.boost - CarPhys.BOOST_PER_SEC * dt);
+      this._lastBoostTime = CarPhys.BOOST_MIN_HOLD;
       const fx = Math.sin(this.angle), fz = Math.cos(this.angle);
       if (this.onGround) {
         this.speed += CarPhys.BOOST_FORCE * 0.62 * dt;
@@ -386,7 +425,6 @@ class Car {
       boosting = this._lastBoostTime > 0;
     }
 
-    // 炎エフェクト
     for (const f of this.flames) f.visible = boosting;
     for (const f of this.flamesInner) f.visible = boosting;
     if (boosting) {
@@ -395,6 +433,7 @@ class Car {
       const si = 0.75 + Math.random() * 0.3;
       this.flamesInner[0].scale.set(1, si, 1); this.flamesInner[1].scale.set(1, si, 1);
     }
+    this._boostingFlag = boosting;
 
     // ===== 最大速度クランプ =====
     const maxV = boosting ? CarPhys.MAX_SPEED_BOOST : CarPhys.MAX_SPEED;
@@ -417,23 +456,25 @@ class Car {
         this.vy = CarPhys.DOUBLE_JUMP_VEL * jumpMult;
         this.jumpsUsed++;
         this.isFlipping = true;
-        // フリップ方向: ステア入力で前/横方向に切替
-        // steer が大きいなら横フリップ、ほぼ0なら前フリップ
+        this._flipTimer = CarPhys.FLIP_DURATION;
         const lateral = Math.abs(input.steer);
         let fx, fz;
         if (lateral > 0.45) {
-          // 横フリップ (左右)
-          const side = input.steer < 0 ? 1 : -1; // ステア左ならX-側へ
+          const side = input.steer < 0 ? 1 : -1;
           fx = Math.cos(this.angle) * side;
           fz = -Math.sin(this.angle) * side;
           this.roll += Math.PI * 0.6 * side;
         } else if (input.brake) {
-          // 後ろフリップ (バックフリップ)
+          // バックフリップ → ハーフフリップ (前進中なら逆向きに高速反転)
           fx = -Math.sin(this.angle);
           fz = -Math.cos(this.angle);
           this.pitch -= Math.PI * 0.55;
+          // ハーフフリップ判定: 前進中の後フリップなら更に減速して反転を効かせる
+          if (this.speed > 30) {
+            this.speed *= 0.4;
+            this.angle += Math.PI; // 反対向きを向く
+          }
         } else {
-          // 前フリップ
           fx = Math.sin(this.angle);
           fz = Math.cos(this.angle);
           this.pitch += Math.PI * 0.65;
@@ -443,8 +484,6 @@ class Car {
         this.vz += fz * fv;
         this._jumpEdgeTimer = 0.08;
         this._flipDir = input.brake ? -1 : 1;
-        // フリップ終了タイマー (アニメ判定用)
-        setTimeout(() => { this.isFlipping = false; }, 350);
       }
     }
 
@@ -476,9 +515,7 @@ class Car {
       if (!this.onGround) {
         this.onGround = true;
         this.jumpsUsed = 0;
-        // 着地時 speed = 前進方向成分
         this.speed = this.vx * Math.sin(this.angle) + this.vz * Math.cos(this.angle);
-        // ハードランディング判定
         const upsideDown = Math.abs(this.pitch) > Math.PI / 2 + 0.4 || Math.abs(this.roll) > Math.PI / 2 + 0.4;
         if (upsideDown) {
           this.speed *= 0.55;
@@ -504,13 +541,12 @@ class Car {
 
     // ===== スーパーソニック判定 =====
     const curSpeed = Math.sqrt(this.vx*this.vx + this.vy*this.vy + this.vz*this.vz);
-    // ヒステリシス (一度発動したら速度がやや下がっても維持)
     if (this.isSupersonic) {
       this.isSupersonic = curSpeed > CarPhys.SUPERSONIC_SPEED * 0.92;
     } else {
       this.isSupersonic = curSpeed > CarPhys.SUPERSONIC_SPEED;
     }
-    // スーパーソニックトレイル表示
+    // スーパーソニックトレイル
     if (this._ssTrail) {
       const targetOpacity = this.isSupersonic ? 0.85 : 0;
       this._ssTrail.material.opacity = Utils.lerp(this._ssTrail.material.opacity, targetOpacity, 0.15);
@@ -525,7 +561,35 @@ class Car {
       this.tires[1].rotation.y = steerLook;
     }
 
+    // ===== オーラ更新 =====
+    this._updateAuras(dt);
+
     this.syncMesh();
+  }
+
+  _updateAuras(dt) {
+    // シールド: パルス + 透明度
+    if (this._shieldMesh) {
+      const target = this.activePower === 'shield' ? 0.42 : 0;
+      const m = this._shieldMesh.material;
+      m.opacity = Utils.lerp(m.opacity, target, 0.18);
+      const pulse = 1 + Math.sin(performance.now() / 200) * 0.05;
+      this._shieldMesh.scale.set(pulse, pulse, pulse);
+      this._shieldMesh.rotation.y += dt * 1.4;
+    }
+    // MAGNET: 3つのトーラスを回転
+    if (this._magnetMeshes) {
+      const isMag = this.activePower === 'magnet';
+      for (const m of this._magnetMeshes) {
+        const target = isMag ? 0.7 : 0;
+        m.material.opacity = Utils.lerp(m.material.opacity, target, 0.18);
+      }
+      if (isMag) {
+        this._magnetMeshes[0].rotation.x += dt * 3;
+        this._magnetMeshes[1].rotation.y += dt * 2.6;
+        this._magnetMeshes[2].rotation.z += dt * 3.2;
+      }
+    }
   }
 
   syncMesh() {
@@ -548,7 +612,6 @@ class Car {
       this.onGround = false;
     };
 
-    // 側壁 X
     if (this.x > Arena.W/2 - r) {
       this.x = Arena.W/2 - r;
       if (this.vx > 0) {
@@ -567,7 +630,6 @@ class Car {
         climbFromWall(impact);
       }
     }
-    // 短辺 Z (ゴール口除外)
     const inGoalSlot = Arena.isInGoalSlot(this.x, this.y, r);
     if (this.z > Arena.L/2 - r && !inGoalSlot) {
       this.z = Arena.L/2 - r;
@@ -587,16 +649,13 @@ class Car {
         climbFromWall(impact);
       }
     }
-    // 天井
     if (this.y > Arena.H - r) {
       this.y = Arena.H - r;
       if (this.vy > 0) this.vy = -this.vy * 0.4;
     }
-    // コーナー(斜め壁)
     Arena.resolveCornerCollision(this, r, 0.45);
   }
 
-  // 受信状態の適用
   applyRemoteState(state) {
     this.x = Utils.lerp(this.x, state.x, 0.4);
     this.y = Utils.lerp(this.y, state.y, 0.4);
@@ -615,6 +674,7 @@ class Car {
     this.onGround = !!state.onGround;
     for (const f of this.flames) f.visible = !!state.boosting;
     for (const f of this.flamesInner) f.visible = !!state.boosting;
+    this._updateAuras(0.016);
     this.syncMesh();
   }
 
@@ -626,15 +686,13 @@ class Car {
       angle: this.angle, pitch: this.pitch, roll: this.roll,
       speed: this.speed, boost: this.boost, onGround: this.onGround,
       boosting: boostingNow,
+      power: this.activePower || null,
     };
   }
 
-  // ボール衝突の見た目フィードバック + 軽い反作用
   bumpFromBall(power) {
     const k = Math.min(1, power / 30);
     this.pitch += (Math.random() - 0.5) * 0.35 * k;
     this.roll  += (Math.random() - 0.5) * 0.35 * k;
-    // 重い当たりは車も少し押し返される (打感UP)
-    // game.js から呼ばれる位置で衝突法線が分かるが、ここでは見た目だけ
   }
 }

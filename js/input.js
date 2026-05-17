@@ -1,27 +1,39 @@
 // ============= 入力管理 (ジャイロ + タッチボタン) =============
-// スマホ横画面でのジャイロ操作を最大限直感的にするための入力レイヤ。
+// スマホ横画面でのジャイロ操作を最大限直感的にするための入力レイヤ。PDCA7 で
+// 「もっと楽しく/操作しやすく」を目標に大規模リファクタしている。
 //
-// ボタン配置 (タッチ):
-//   - 左下:   JUMP        (ジャンプ。短押しで通常ジャンプ、空中で再度押すとフリップ)
+// ボタン配置 (タッチ、横画面想定):
+//   - 左下:   JUMP        (短押し = 通常ジャンプ。空中で再度押すとフリップ)
 //   - 右下:   ACCEL       (前進アクセル)
-//   - 左中下: AIR ROLL    (空中限定。押している間はステア入力をロールに切り替え)
-//   - 右中下: BOOST       (ブースト。長押し中、燃料が残っている間)
+//   - 左中:   AIR ROLL L  (空中で左ロール: 押している間ステア入力をロールに切替)
+//   - 右中:   BOOST       (ブースト。長押しで燃料消費)
 //   - 右上:   CAMERA      (カメラ視点切替: 通常 / ボール視点)
+//   - 中央:   HANDBRAKE   (パウダースライド・ハンドブレーキ。短押しで横滑り)
 //
-// ジャイロ:
+// ジャイロ操作:
 //   - 左右の傾き (gamma/beta) → ステアリング (画面回転を考慮)
-//   - 端末を奥に倒す(=底面が前) → アクセル (ACCELボタンの代替・オプション)
+//   - 端末を奥に倒す(=底面が前) → アクセル (オプション)
 //   - 端末を手前に倒す(=底面が後ろ) → ブレーキ/バック (ヒステリシス付き)
+//
+// 主な改善点:
+//   - 感度のクイックプリセット (LOW / MED / HIGH) を `setPreset()` で提供
+//   - ステア入力の非線形化を見直し: 中央 0〜0.4 をマイルド、0.4〜1.0 を加速
+//   - ジャイロ無効時のキーボードステアにもイージング (急に最大値にならない)
+//   - 「両親指で操作」を前提に touch のマルチポインタ・ロストを強化
+//   - ジャンプ入力に立ち上がりエッジ + 100ms クールダウン (連射チャタリング防止)
+//   - ハンドブレーキ (パウダースライド) 入力を追加
+//   - 画面ロックされた状態でのジャイロ基準値を「中央〜±15° の範囲で軟キャリブレ」
 const Input = {
   // ====== 出力 (ゲームから読まれる) ======
   steer: 0,        // -1 .. 1 (左右ステア)
   pitch: 0,        // -1 .. 1 (前後傾)
   accel: false,    // ACCELボタン押下 or 強い前傾(オプション)
-  brake: false,    // 手前に傾けるとON
+  brake: false,    // 手前に傾けるとON or BRAKEキー
   boost: false,    // BOOSTボタン押下 or オプションで強前傾
   jump: false,     // 押した瞬間1フレームだけ立つ (consumeJumpで消費)
   jumpHeld: false,
   airRoll: false,  // AIR ROLLボタン押下中 ⇒ ステア入力をロールに使う
+  handbrake: false,// ハンドブレーキ (パウダースライド)
   cameraToggleRequest: false, // カメラ切替要求 (consume制)
 
   // ====== ジャイロ状態 ======
@@ -43,21 +55,26 @@ const Input = {
 
   // ====== 設定 (LocalStorage に保存) ======
   // sensitivity: ステアがフルになる傾き(度)。小さいほど敏感。
-  // 16°デフォルトは「軽い手首ひねりで切れる」感覚。
   sensitivity: 16,
-  deadzone: 0.7,            // 微小入力の無視幅(度)。0.8 → 0.7 でさらに繊細に
+  deadzone: 0.6,
   invert: false,
-  // ピッチ
   pitchSensitivity: 18,
   pitchDeadzone: 4.0,
   brakeThreshold: 0.42,
   boostThreshold: 0.45,
-  autoBoost: false,         // ON: 前傾でブースト発動
-  autoAccel: false,         // ON: 前傾(=底を前)で自動アクセル (ACCELボタン不要)
-  // 中央緩やかカーブ
+  autoBoost: false,
+  autoAccel: false,
   steerCurveExp: 1.4,
 
+  // 感度プリセット
+  PRESETS: {
+    low:  { sensitivity: 26, curve: 1.7 },  // のんびり: 倒さないとフル切れない
+    med:  { sensitivity: 18, curve: 1.45 }, // 標準
+    high: { sensitivity: 12, curve: 1.25 }, // キビキビ: 軽い手首ひねりで切れる
+  },
+
   _keys: {},
+  _jumpEdgeCooldown: 0,
 
   init() {
     this._safeStorage = this._getStorage();
@@ -79,6 +96,14 @@ const Input = {
     this._storageSet('soccer-curve', String(this.steerCurveExp));
   },
 
+  setPreset(name) {
+    const p = this.PRESETS[name];
+    if (!p) return;
+    this.setSensitivity(p.sensitivity);
+    this.setCurve(p.curve);
+    this._storageSet('soccer-preset', name);
+  },
+
   _setupAutoCalibrate() {
     if (screen.orientation) {
       try {
@@ -91,16 +116,22 @@ const Input = {
   _bindKeys() {
     // PC 用キーボード (デバッグ・PC ユーザー向け)
     window.addEventListener('keydown', (e) => {
-      // テキスト入力中は無視
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (e.repeat) return;
       const k = e.key.toLowerCase();
       this._keys[k] = true;
       this._updateFromKeys();
-      if (k === ' ' || k === 'j') { this.jump = true; this.jumpHeld = true; }
+      if (k === ' ' || k === 'j') {
+        if (this._jumpEdgeCooldown <= 0) {
+          this.jump = true;
+          this._jumpEdgeCooldown = 0.1;
+        }
+        this.jumpHeld = true;
+      }
       if (k === 'shift') this.boost = true;
       if (k === 'q' || k === 'l') this.airRoll = true;
+      if (k === 'e' || k === 'h') this.handbrake = true;
       if (k === 'v') this.cameraToggleRequest = true;
     });
     window.addEventListener('keyup', (e) => {
@@ -112,11 +143,11 @@ const Input = {
       if (k === ' ' || k === 'j') this.jumpHeld = false;
       if (k === 'shift') this.boost = false;
       if (k === 'q' || k === 'l') this.airRoll = false;
+      if (k === 'e' || k === 'h') this.handbrake = false;
     });
   },
 
   _updateFromKeys() {
-    // ジャイロ無効時はキーボードでステア + ブレーキ
     if (this.gyroEnabled) return;
     const keys = this._keys;
     const lr = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
@@ -124,46 +155,47 @@ const Input = {
     this.brake = !!(keys['arrowdown'] || keys['s']);
     this.accel = !!(keys['arrowup'] || keys['w']);
   },
-  // ジャイロ ON でもキーボード入力をマージ (PC テスト用)
   _keyboardOverride() {
     const keys = this._keys;
     if (keys['arrowup'] || keys['w']) this.accel = true;
     if (keys['arrowdown'] || keys['s']) this.brake = true;
   },
 
-  // ==== タッチボタンユーティリティ: 「押している間 ON」ボタン ====
+  // ==== タッチボタン: 「押している間 ON」====
   _bindHoldButton(id, onPress, onRelease) {
     const el = document.getElementById(id);
     if (!el) return;
-    let pointerId = null;
+    // 複数同時タッチ対応: 各ボタンに紐づくpointerIdセット
+    const activePointers = new Set();
     const on = (e) => {
       if (e && e.preventDefault) e.preventDefault();
-      if (e && e.pointerId != null) pointerId = e.pointerId;
+      if (e && e.pointerId != null) activePointers.add(e.pointerId);
       el.classList.add('pressed');
       onPress && onPress();
     };
     const off = (e) => {
       if (e && e.preventDefault) e.preventDefault();
-      el.classList.remove('pressed');
-      onRelease && onRelease();
-      pointerId = null;
+      if (e && e.pointerId != null) activePointers.delete(e.pointerId);
+      // ポインタが全部離れたら off
+      if (activePointers.size === 0) {
+        el.classList.remove('pressed');
+        onRelease && onRelease();
+      }
     };
-    // pointer + touch + mouse 全部に対応 (チャタリング防止のため複数経路で off を保障)
     el.addEventListener('pointerdown', on);
     el.addEventListener('pointerup', off);
     el.addEventListener('pointercancel', off);
-    el.addEventListener('pointerleave', (e) => { if (pointerId !== null) off(e); });
+    el.addEventListener('pointerleave', off);
     el.addEventListener('touchstart', on, { passive: false });
     el.addEventListener('touchend', off, { passive: false });
     el.addEventListener('touchcancel', off, { passive: false });
     el.addEventListener('mousedown', on);
     el.addEventListener('mouseup', off);
     el.addEventListener('mouseleave', off);
-    // 文脈メニュー抑止
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   },
 
-  // 「押した瞬間トリガー」ボタン
+  // 「押した瞬間トリガー」ボタン (再エッジ検出はクールダウン付き)
   _bindTapButton(id, onTap) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -179,19 +211,27 @@ const Input = {
   },
 
   _bindTouch() {
-    // JUMP ボタン (タップ = 1度トリガー、ホールド検知も)
+    // JUMP ボタン: タップで1度トリガー + ホールド検知 + チャタリング防止
     const jumpBtn = document.getElementById('ctrl-jump');
     if (jumpBtn) {
+      const activePointers = new Set();
       const on = (e) => {
         if (e && e.preventDefault) e.preventDefault();
-        this.jump = true;
+        if (e && e.pointerId != null) activePointers.add(e.pointerId);
+        if (this._jumpEdgeCooldown <= 0) {
+          this.jump = true;
+          this._jumpEdgeCooldown = 0.1;
+        }
         this.jumpHeld = true;
         jumpBtn.classList.add('pressed');
       };
       const off = (e) => {
         if (e && e.preventDefault) e.preventDefault();
-        this.jumpHeld = false;
-        jumpBtn.classList.remove('pressed');
+        if (e && e.pointerId != null) activePointers.delete(e.pointerId);
+        if (activePointers.size === 0) {
+          this.jumpHeld = false;
+          jumpBtn.classList.remove('pressed');
+        }
       };
       jumpBtn.addEventListener('pointerdown', on);
       jumpBtn.addEventListener('pointerup', off);
@@ -206,23 +246,20 @@ const Input = {
       jumpBtn.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
-    // ACCELボタン (ホールド)
     this._bindHoldButton('ctrl-accel', () => { this.accel = true; }, () => { this.accel = false; });
-    // BOOSTボタン (ホールド)
     this._bindHoldButton('ctrl-boost', () => { this.boost = true; }, () => { this.boost = false; });
-    // AIR ROLLボタン (ホールド)
     this._bindHoldButton('ctrl-airroll', () => { this.airRoll = true; }, () => { this.airRoll = false; });
-    // CAMERA切替 (タップ)
+    this._bindHoldButton('ctrl-handbrake', () => { this.handbrake = true; }, () => { this.handbrake = false; });
     this._bindTapButton('btn-camera', () => { this.cameraToggleRequest = true; });
   },
 
   // === メインループから毎フレーム呼ばれる ===
   update(dt) {
-    // ジャイロパケットが暫く来てなかったら静止扱い (フリーズ防止)
+    if (this._jumpEdgeCooldown > 0) this._jumpEdgeCooldown -= dt;
     if (this.gyroEnabled) {
       const now = performance.now();
       if (this._lastOrientUpdateTime && now - this._lastOrientUpdateTime > 500) {
-        // 0.5秒以上来てない → ステア徐々に0へ
+        // ジャイロデータが暫く来てない → 0 へ徐々に戻す (フリーズ防止)
         this._smoothed = Utils.lerp(this._smoothed, 0, dt * 4);
         this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, 0, dt * 4);
         this.steer = this._smoothed;
@@ -231,7 +268,7 @@ const Input = {
       // PC キーボードでも accel/brake をオーバーライド (デバッグ用)
       this._keyboardOverride();
     } else {
-      // ジャイロが無効ならキーボード steer をスムージング
+      // ジャイロ無効ならキーボード steer をスムージング
       const target = this._keySteer || 0;
       const response = target === 0 ? 22 : 18;
       const alpha = Utils.clamp(dt * response, 0.28, 0.85);
@@ -333,7 +370,14 @@ const Input = {
     else diff -= Math.sign(diff) * this.deadzone;
     const norm = Utils.clamp(diff / this.sensitivity, -1.2, 1.2);
     const absNorm = Math.min(1, Math.abs(norm));
-    const curved = Math.sign(norm) * Math.pow(absNorm, this.steerCurveExp);
+    // 二段カーブ: 0〜0.4 はかなりマイルド、0.4〜1.0 で加速して切る
+    let curved;
+    if (absNorm < 0.4) {
+      curved = Math.sign(norm) * Math.pow(absNorm / 0.4, this.steerCurveExp) * 0.4;
+    } else {
+      const t = (absNorm - 0.4) / 0.6;
+      curved = Math.sign(norm) * (0.4 + Math.pow(t, 0.85) * 0.6);
+    }
     let target = -Utils.clamp(curved, -1, 1);
     if (this.invert) target = -target;
 
@@ -349,33 +393,31 @@ const Input = {
     const pcurved = Math.sign(pnorm) * Math.pow(Math.min(1, Math.abs(pnorm)), 1.2);
     const ptarget = Utils.clamp(pcurved, -1, 1);
 
-    // 適応的ローパス
+    // 適応的ローパス: dt と変化量で動的に alpha 決定
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
     const delta = Math.abs(target - this._smoothed);
-    const alpha = Utils.clamp(dt * (30 + delta * 36), 0.34, 0.94);
+    const alpha = Utils.clamp(dt * (32 + delta * 38), 0.36, 0.94);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
     this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha * 0.85);
 
     this.steer = this._smoothed;
     this.pitch = this._pitchSmoothed;
 
-    // ピッチ後傾 (端末を起こす = pitch > 0) でブレーキ (ヒステリシス付き)
+    // ピッチ後傾でブレーキ (ヒステリシス付き)
     if (this.brake) {
       this.brake = (this.pitch > this.brakeThreshold * 0.62);
     } else {
       this.brake = (this.pitch > this.brakeThreshold);
     }
-    // 前傾でブースト (オプション) - BOOSTボタンが ON ならそれを優先
+    // 前傾でブースト (オプション)
     if (this.autoBoost) {
-      // ピッチ前傾が深い → ブースト ON 補助
-      // ※ ボタンが押されている時はそのまま、ボタン無しなら pitch で判断
       if (this.pitch < -this.boostThreshold) {
         this.boost = true;
       }
     }
-    // 前傾でアクセル (オプション、ACCELボタン不要)
+    // 前傾でアクセル (オプション)
     if (this.autoAccel && this.pitch < -0.2) {
       this.accel = true;
     }

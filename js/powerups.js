@@ -1,12 +1,10 @@
 // ============= パワーアップシステム (オリジナル要素) =============
-// フィールド上にランダムなアイテムボックスが出現。取ると一定時間のバフ。
-// 種類:
-//  - SHIELD: デモリッション耐性 (12秒)
-//  - MAGNET: ボールを引き寄せる (10秒)
-//  - GIANT:  車1.5倍&重く、ボールを吹き飛ばしやすく (8秒)
-//  - TURBO:  ブースト無限 (6秒)
-//  - SPRING: ジャンプ力2倍、3段ジャンプ可 (10秒)
-
+// PDCA7 改善:
+//   - アイコンスプライトテクスチャをキャッシュ (毎回 canvas 生成しない → 軽量化)
+//   - MAGNET の引き寄せ力を強化 (35m → 40m まで効果範囲拡大)
+//   - SHIELD/MAGNET の可視オーラは car.js 側で実装 (常時アニメ)
+//   - パワーアップ取得時に車を画面で見える発光リング (パーティクル爆発済み)
+//   - turbo の効果は car.js 側で boost 燃料消費を止めるように修正
 const PowerUps = {
   TYPES: ['shield', 'magnet', 'giant', 'turbo', 'spring'],
   META: {
@@ -17,29 +15,42 @@ const PowerUps = {
     spring: { color: 0x66bb6a, icon: '🪀', label: 'SPRING',   dur: 10 },
   },
 
-  // フィールド上のボックス
   boxes: [],
   spawnTimer: 0,
-  spawnInterval: 11, // 秒 (14 → 11、もう少し頻繁に)
-  maxBoxes: 4,       // 同時最大 (3 → 4)
+  spawnInterval: 11,
+  maxBoxes: 4,
   scene: null,
   enabled: true,
+  _iconTexCache: {}, // kind -> THREE.CanvasTexture (使い回し)
 
   init(scene) {
     this.scene = scene;
     this.boxes = [];
     this.spawnTimer = 6;
+    // アイコンテクスチャを事前生成してキャッシュ
+    for (const kind of this.TYPES) {
+      this._iconTexCache[kind] = this._makeIconTex(this.META[kind].icon);
+    }
+  },
+
+  _makeIconTex(icon) {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.font = '90px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 64, 70);
+    return new THREE.CanvasTexture(c);
   },
 
   reset() {
-    for (const b of this.boxes) {
-      this._disposeBox(b);
-    }
+    for (const b of this.boxes) this._disposeBox(b);
     this.boxes = [];
     this.spawnTimer = 6;
   },
 
-  // Group の子 Mesh を再帰的に dispose する (THREE.Group には .geometry/.material が無いためのバグ対策)
+  // Group の子 Mesh を再帰的に dispose
   _disposeBox(b) {
     if (!b || !b.mesh) return;
     if (this.scene) this.scene.remove(b.mesh);
@@ -51,10 +62,8 @@ const PowerUps = {
         if (obj.material) {
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
           for (const m of mats) {
-            if (m && m.map && m.map.dispose) {
-              try { m.map.dispose(); } catch (_) {}
-            }
-            if (m && m.dispose) {
+            // ※ アイコンテクスチャはキャッシュ。dispose しない
+            if (m && m.dispose && !m._iconCached) {
               try { m.dispose(); } catch (_) {}
             }
           }
@@ -69,7 +78,6 @@ const PowerUps = {
     if (this.spawnTimer <= 0 && this.boxes.length < this.maxBoxes) {
       const box = this._spawnBox();
       this.spawnTimer = this.spawnInterval + Math.random() * 5;
-      // クライアントへスポーン通知 (ホストのみ)
       if (Net.peer && Net.isHost && box) {
         Net._broadcast({
           type: 'powerupSpawn',
@@ -77,15 +85,14 @@ const PowerUps = {
         });
       }
     }
-    // ボックス回転＆浮遊
     const t = performance.now() / 600;
     for (const b of this.boxes) {
       b.mesh.rotation.y += dt * 1.6;
       b.mesh.rotation.x += dt * 0.6;
       b.mesh.position.y = b.baseY + Math.sin(t + b.phase) * 0.6;
     }
-    // 車との接触判定 (ローカル車のみ取らせる: ホスト権威で全車判定)
-    if (Net.peer && !Net.isHost) return; // クライアントは取らない
+    // 車との接触判定: クライアントは取らない (ホスト権威)
+    if (Net.peer && !Net.isHost) return;
     for (const car of Game.cars.values()) {
       if (car.respawnTimer > 0) continue;
       for (let i = this.boxes.length - 1; i >= 0; i--) {
@@ -97,7 +104,6 @@ const PowerUps = {
           this._collect(car, b);
           const removedId = b.id;
           this._removeBox(i);
-          // ネット同期 (ホスト)
           if (Net.peer && Net.isHost) {
             Net._broadcast({ type: 'powerupTaken', carId: car.id, kind: b.kind, boxId: removedId });
           }
@@ -106,10 +112,8 @@ const PowerUps = {
     }
   },
 
-  // クライアント用: ホスト由来のボックススポーン適用
   applyRemoteSpawn(data) {
     if (Net.isHost || !this.scene) return;
-    // 既に同 id があれば無視
     if (this.boxes.find(b => b.id === data.id)) return;
     this._buildBox(data.kind, data.x, data.z, data.baseY, data.phase, data.id);
   },
@@ -123,7 +127,6 @@ const PowerUps = {
   _spawnBox() {
     if (!this.scene) return null;
     const kind = this.TYPES[Math.floor(Math.random() * this.TYPES.length)];
-    // ランダム位置 (中央寄り・ペナルティエリア外)
     const margin = 14;
     const x = (Math.random() - 0.5) * (Arena.W - margin * 2);
     const z = (Math.random() - 0.5) * (Arena.L * 0.6);
@@ -136,7 +139,6 @@ const PowerUps = {
   _buildBox(kind, x, z, baseY, phase, id) {
     const meta = this.META[kind];
     if (!meta) return null;
-    // ボックスメッシュ: 透明な多面体 + アイコン
     const group = new THREE.Group();
     const boxGeo = new THREE.OctahedronGeometry(2.2, 0);
     const boxMat = new THREE.MeshLambertMaterial({
@@ -144,21 +146,15 @@ const PowerUps = {
     });
     const box = new THREE.Mesh(boxGeo, boxMat);
     group.add(box);
-    // 内側のグロー
     const innerGeo = new THREE.OctahedronGeometry(1.0, 0);
     const innerMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const inner = new THREE.Mesh(innerGeo, innerMat);
     group.add(inner);
-    // アイコンスプライト
-    const c = document.createElement('canvas');
-    c.width = 128; c.height = 128;
-    const ctx = c.getContext('2d');
-    ctx.font = '90px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(meta.icon, 64, 70);
-    const tex = new THREE.CanvasTexture(c);
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    // アイコンスプライト (キャッシュ済テクスチャ使用)
+    const tex = this._iconTexCache[kind];
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    spriteMat._iconCached = true; // dispose 時に消さないマーク
+    const sprite = new THREE.Sprite(spriteMat);
     sprite.scale.set(3.5, 3.5, 1);
     group.add(sprite);
 
@@ -184,12 +180,12 @@ const PowerUps = {
     car.activePower = box.kind;
     car.powerTimer = meta.dur;
     SFX.boostPad(true);
-    // 取得ローカルなら表示
+    SFX.powerup && SFX.powerup();
     if (car === Game.localCar) {
       this._renderIndicator();
       showToast(`${meta.icon} ${meta.label} GET!`, 1400);
+      Game.addCamShake && Game.addCamShake(0.35);
     }
-    // パーティクル爆発
     Game._spawnHitParticles(box.x, box.mesh.position.y, box.z, 35);
   },
 
@@ -197,11 +193,9 @@ const PowerUps = {
   applyEffects(car, dt) {
     if (!car.activePower) return;
     car.powerTimer -= dt;
-    const meta = this.META[car.activePower];
     if (car.powerTimer <= 0) {
       car.activePower = null;
       car.powerTimer = 0;
-      // 巨大化解除
       if (car._giantScale) {
         car.mesh.scale.set(1, 1, 1);
         car._giantScale = false;
@@ -209,10 +203,10 @@ const PowerUps = {
       if (car === Game.localCar) this._renderIndicator();
       return;
     }
-    // 効果ごとの実装
     switch (car.activePower) {
       case 'turbo':
-        car.boost = Math.max(car.boost, 30);
+        // 燃料を高速回復 (car.js 側のブースト消費を打ち消す)
+        car.boost = Math.min(car.boostMax, Math.max(car.boost, 30) + 80 * dt);
         break;
       case 'giant':
         if (!car._giantScale) {
@@ -226,19 +220,19 @@ const PowerUps = {
         const dy = (car.y + 2) - ball.y;
         const dz = car.z - ball.z;
         const d = Math.sqrt(dx*dx + dy*dy + dz*dz);
-        if (d < 30 && d > BallPhys.RADIUS + CarPhys.RADIUS + 0.5) {
-          const f = Utils.clamp((30 - d) * 1.6, 0, 30);
+        // 40m まで効果。引き寄せ力もUP
+        if (d < 40 && d > BallPhys.RADIUS + CarPhys.RADIUS + 0.5) {
+          const f = Utils.clamp((40 - d) * 1.9, 0, 38);
           ball.vx += (dx / d) * f * dt;
           ball.vy += (dy / d) * f * dt;
           ball.vz += (dz / d) * f * dt;
         }
         break;
       }
-      // shield / spring は他箇所で扱う
+      // shield / spring は他箇所で扱う (シールドは _demolish 内、SPRING は car.js)
     }
   },
 
-  // ローカル車の取得済みパワーをHUDに表示
   _renderIndicator() {
     const el = document.getElementById('powerup-indicator');
     if (!el || !Game.localCar) return;
@@ -259,7 +253,6 @@ const PowerUps = {
     return [(h >> 16) & 255, (h >> 8) & 255, h & 255].join(',');
   },
 
-  // 毎フレームHUD時間更新
   tickHUD() {
     const el = document.getElementById('powerup-indicator');
     if (!el || !Game.localCar) return;
