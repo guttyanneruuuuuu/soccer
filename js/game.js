@@ -570,7 +570,7 @@ const Game = {
 
   _onGoal(team) {
     this.goalAnimTimer = 1.2;
-    this._goalSlowmoT = 0.45; // スローモーション時間
+    this._goalSlowmoT = 1.2; // スローモーション時間
     this._goalScorerTeam = team;
     SFX.goal();
     const banner = document.getElementById('goal-banner');
