@@ -18,6 +18,7 @@ const Arena = {
   group: null,
   boostPads: [],    // {x, z, big, active, recoverAt, mesh, ring}
   cornerWalls: [],  // {p1, p2, normal} — 斜めコーナー壁の衝突ライン (XZ平面)
+  EDGE_NORMAL_BLEND_DOT: 0.35, // 端点寄りで最近点法線へ切り替える閾値
 
   build(scene) {
     const S = this.SCALE;
@@ -416,17 +417,22 @@ const Arena = {
         const dist2 = dx*dx + dz*dz;
         const d = Math.sqrt(dist2) || 0.0001;
         const signed = dx * cw.nx + dz * cw.nz;
-        const overlap = Math.max(radius - d, radius - signed);
-        if (overlap <= 0) continue;
+        const faceOverlap = radius - signed; // 壁面を跨いだすり抜け用
+        const pointOverlap = radius - d;     // 端点/角のめり込み用
 
-        // すり抜け防止: まず壁内向き法線で押し戻し、端点付近では最近点法線を優先
+        // すり抜け防止: 基本は壁内向き法線、端点寄りなら最近点法線で処理
         let nx = cw.nx, nz = cw.nz;
+        let overlap = faceOverlap;
         if (d > 0.0001) {
           const ex = dx / d, ez = dz / d;
-          if (ex * cw.nx + ez * cw.nz > 0.35) {
+          const edgeDot = ex * cw.nx + ez * cw.nz;
+          if (edgeDot > this.EDGE_NORMAL_BLEND_DOT) {
             nx = ex; nz = ez;
+            overlap = pointOverlap;
           }
         }
+        if (overlap <= 0) continue;
+
         obj.x += nx * overlap;
         obj.z += nz * overlap;
         const vDot = (obj.vx || 0) * nx + (obj.vz || 0) * nz;

@@ -209,6 +209,7 @@ const Input = {
     if (!this.gyroCalibrated) {
       this.gyroSamples.push(steerVal);
       this.pitchSamples.push(pitchVal);
+      // 12サンプルで早めにロックして初動遅延を減らし、以降はベース追従で安定化する
       if (this.gyroSamples.length >= 12) {
         let avg = 0, pavg = 0;
         for (let i = 0; i < this.gyroSamples.length; i++) {
