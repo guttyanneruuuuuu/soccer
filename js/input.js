@@ -1,15 +1,15 @@
-// ============= 入力管理 (ジャイロのみ + JUMP ボタンのみ) =============
+// ============= 入力管理 (ジャイロ + ACCEL/JUMP タッチ) =============
 // racegame のジャイロ実装をベースに、サッカーゲーム用に再構成:
 // - 左右ステアリング: ジャイロの傾き (gamma / beta) を自動キャリブレーション付きで使用
-// - アクセル: 自動 ON (input.accel = true 固定)
+// - アクセル: 画面右下 ACCEL ボタン押下中のみ ON
 // - ブレーキ/バック: 端末を奥(手前)に傾けるとピッチで発動 - ジャイロのみで操作!
-// - ブースト: 端末を強めに前傾するか、画面長押し (オプション)
+// - ブースト: 端末を強めに前傾 (オプション) または Shift
 // - ジャンプ: 画面のジャンプボタン (押した瞬間のみ true)
 const Input = {
   // 出力
   steer: 0,       // -1 .. 1 (ジャイロ左右)
   pitch: 0,       // -1 .. 1 (ジャイロ前後傾)
-  accel: true,    // 自動 ON
+  accel: false,   // ACCELボタン押下時 ON
   brake: false,   // ピッチ後傾 (端末を起こす)
   boost: false,   // ピッチ前傾 (端末を前に倒す) で発動
   jump: false,    // 1フレームだけ立つトリガー
@@ -30,13 +30,13 @@ const Input = {
   _fallbackLandscapeSign: 1,
   _safeStorage: null,
 
-  // 設定値 (操作性改善後)
-  sensitivity: 10,   // 左右ステア感度を上げて直感操作に寄せる
-  deadzone: 0.8,     // 小さい傾きでも曲がり始める
+  // 設定値 (ジャイロ安定化)
+  sensitivity: 12,
+  deadzone: 1.2,
   invert: false,
-  pitchSensitivity: 14,
-  pitchDeadzone: 2.2,
-  brakeThreshold: 0.24,
+  pitchSensitivity: 16,
+  pitchDeadzone: 2.8,
+  brakeThreshold: 0.3,
   boostThreshold: 0.34,
   autoBoost: false,        // 前傾でブーストするか (デフォルトOFF)
 
@@ -87,11 +87,11 @@ const Input = {
   _updateFromKeys() {
     // ジャイロが無効なときに限り、キーボードでステア + ブレーキできる
     if (this.gyroEnabled) return;
-    const k = this._keys;
-    const lr = (k['arrowright'] || k['d'] ? 1 : 0) + (k['arrowleft'] || k['a'] ? -1 : 0);
+    const keys = this._keys;
+    const lr = (keys['arrowright'] || keys['d'] ? 1 : 0) + (keys['arrowleft'] || keys['a'] ? -1 : 0);
     this._keySteer = lr;
-    this.brake = !!(k['arrowdown'] || k['s']);
-    // accel は常に ON
+    this.brake = !!(keys['arrowdown'] || keys['s']);
+    this.accel = !!(keys['arrowup'] || keys['w']);
   },
 
   _bindTouch() {
@@ -117,25 +117,25 @@ const Input = {
       jumpBtn.addEventListener('mouseleave', off);
     }
 
-    // ブーストボタン (オプション)
-    const boostBtn = document.getElementById('ctrl-boost');
-    if (boostBtn) {
+    // アクセルボタン
+    const accelBtn = document.getElementById('ctrl-accel');
+    if (accelBtn) {
       const on = (e) => {
         if (e && e.preventDefault) e.preventDefault();
-        this.boost = true;
-        boostBtn.classList.add('pressed');
+        this.accel = true;
+        accelBtn.classList.add('pressed');
       };
       const off = (e) => {
         if (e && e.preventDefault) e.preventDefault();
-        this.boost = false;
-        boostBtn.classList.remove('pressed');
+        this.accel = false;
+        accelBtn.classList.remove('pressed');
       };
-      boostBtn.addEventListener('touchstart', on, { passive: false });
-      boostBtn.addEventListener('touchend', off, { passive: false });
-      boostBtn.addEventListener('touchcancel', off, { passive: false });
-      boostBtn.addEventListener('mousedown', on);
-      boostBtn.addEventListener('mouseup', off);
-      boostBtn.addEventListener('mouseleave', off);
+      accelBtn.addEventListener('touchstart', on, { passive: false });
+      accelBtn.addEventListener('touchend', off, { passive: false });
+      accelBtn.addEventListener('touchcancel', off, { passive: false });
+      accelBtn.addEventListener('mousedown', on);
+      accelBtn.addEventListener('mouseup', off);
+      accelBtn.addEventListener('mouseleave', off);
     }
   },
 
@@ -209,8 +209,8 @@ const Input = {
     if (!this.gyroCalibrated) {
       this.gyroSamples.push(steerVal);
       this.pitchSamples.push(pitchVal);
-      // 12サンプルで初動遅延を減らし、以降はベース追従で安定化する（ノイズ端末では20より基準精度が落ちうる）
-      if (this.gyroSamples.length >= 12) {
+      // 16サンプルで初期姿勢を平均化し、端末ごとのセンサーノイズ差を吸収
+      if (this.gyroSamples.length >= 16) {
         let avg = 0, pavg = 0;
         for (let i = 0; i < this.gyroSamples.length; i++) {
           avg += this.gyroSamples[i];
@@ -230,8 +230,8 @@ const Input = {
     // ===== ステアリング =====
     let diff = steerVal - this.gyroBase;
     // 微弱ドリフト追従
-    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 2.5) {
-      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.012);
+    if (this.gyroCalibrated && Math.abs(diff) < this.deadzone * 2.3) {
+      this.gyroBase = Utils.lerp(this.gyroBase, steerVal, 0.009);
       diff = steerVal - this.gyroBase;
     }
     if (Math.abs(diff) < this.deadzone) diff = 0;
@@ -244,8 +244,8 @@ const Input = {
     // ===== ピッチ (ブレーキ/ブースト判定) =====
     let pdiff = pitchVal - this.pitchBase;
     // ピッチ基準はゆっくり追従するがステアより遅め
-    if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.5) {
-      this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.006);
+    if (this.gyroCalibrated && Math.abs(pdiff) < this.pitchDeadzone * 1.4) {
+      this.pitchBase = Utils.lerp(this.pitchBase, pitchVal, 0.0045);
       pdiff = pitchVal - this.pitchBase;
     }
     if (Math.abs(pdiff) < this.pitchDeadzone) pdiff = 0;
@@ -258,7 +258,7 @@ const Input = {
     const now = performance.now();
     const dt = this.gyroLastSampleTime ? (now - this.gyroLastSampleTime) / 1000 : 0.016;
     this.gyroLastSampleTime = now;
-    const alpha = Utils.clamp(dt * 36, 0.45, 0.9);
+    const alpha = Utils.clamp(dt * 30, 0.35, 0.82);
     this._smoothed = Utils.lerp(this._smoothed, target, alpha);
     this._pitchSmoothed = Utils.lerp(this._pitchSmoothed, ptarget, alpha);
 

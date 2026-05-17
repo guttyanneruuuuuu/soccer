@@ -522,9 +522,9 @@ input { font: inherit; }
   transform: scale(0.92);
 }
 
-/* JUMPボタン: 右下 (親指が届きやすい位置) — 大型 */
+/* JUMPボタン: 左下 (親指が届きやすい位置) — 大型 */
 .ctrl-jump {
-  right: max(20px, env(safe-area-inset-right, 20px));
+  left: max(20px, env(safe-area-inset-left, 20px));
   bottom: 22px;
   width: 110px;
   height: 110px;
@@ -535,9 +535,9 @@ input { font: inherit; }
 }
 .ctrl-jump:active { box-shadow: 0 0 32px rgba(33,150,243,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
 
-/* BOOSTボタン: 左下 — 同じく大型 */
-.ctrl-boost {
-  left: max(20px, env(safe-area-inset-left, 20px));
+/* ACCELボタン: 右下 — 同じく大型 */
+.ctrl-accel {
+  right: max(20px, env(safe-area-inset-right, 20px));
   bottom: 22px;
   width: 110px;
   height: 110px;
@@ -546,11 +546,11 @@ input { font: inherit; }
   border-color: rgba(255,255,255,0.7);
   box-shadow: 0 0 24px rgba(255,109,0,0.7), inset 0 -6px 12px rgba(0,0,0,0.3);
 }
-.ctrl-boost:active { box-shadow: 0 0 36px rgba(255,109,0,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
+.ctrl-accel:active { box-shadow: 0 0 36px rgba(255,109,0,1), inset 0 -2px 6px rgba(0,0,0,0.3); }
 
 /* 横画面が小さいスマホ用 */
 @media (orientation: landscape) and (max-height: 420px) {
-  .ctrl-jump, .ctrl-boost { width: 92px; height: 92px; font-size: 14px; bottom: 14px; }
+  .ctrl-jump, .ctrl-accel { width: 92px; height: 92px; font-size: 14px; bottom: 14px; }
 }
 
 /* ===== ミニマップ ===== */
