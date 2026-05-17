@@ -212,19 +212,24 @@ const Game = {
   update(dt) {
     Input.update(dt);
 
-    // キックオフ前カウントダウン中は車もボールも動かさない
-    const kickoffActive = this.kickoffCountdown > 0;
-    if (kickoffActive) {
+    // タイマー健全化（NaN/負値で進行停止しないようにする）
+    if (!Number.isFinite(this.kickoffCountdown) || this.kickoffCountdown < 0) this.kickoffCountdown = 0;
+    if (!Number.isFinite(this.goalAnimTimer) || this.goalAnimTimer < 0) this.goalAnimTimer = 0;
+    if (this.kickoffCountdown > 0) {
       this.kickoffCountdown -= dt;
+      if (this.kickoffCountdown <= 0) this.kickoffCountdown = 0;
     }
 
     // ゴール演出中
     if (this.goalAnimTimer > 0) {
       this.goalAnimTimer -= dt;
       if (this.goalAnimTimer <= 0) {
+        this.goalAnimTimer = 0;
         this._kickoffReset();
       }
     }
+    // キックオフ前カウントダウン中は車もボールも動かさない
+    const kickoffActive = this.kickoffCountdown > 0;
 
     // タイマー
     if (this.matchStarted && !this.matchEnded && this.goalAnimTimer <= 0 && !kickoffActive) {
@@ -638,6 +643,7 @@ const Game = {
   },
 
   _kickoffReset() {
+    this.goalAnimTimer = 0;
     this.ball.reset();
     const blueList = Array.from(this.cars.values()).filter(c => c.team === 'blue');
     const orgList = Array.from(this.cars.values()).filter(c => c.team === 'orange');
