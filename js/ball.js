@@ -3,12 +3,12 @@
 // ボールサイズ3倍 → 半径 10.8 (実物は ~0.93m だがプレイ性優先で大きく)
 const BallPhys = {
   RADIUS: 10.8,
-  GRAVITY: 15,            // 通常重力38 → ぐっと弱めて空中保持時間を伸ばす (微増14→15で落ちが速くなりすぎず)
+  GRAVITY: 22,            // 滞空が長すぎるため落下を速める
   AIR_FRICTION: 0.05,     // 風船らしく空気抵抗ややあり (0.06 → 0.05 で減速をマイルドに)
   GROUND_FRICTION: 0.45,
   WALL_BOUNCE: 0.92,
-  FLOOR_BOUNCE: 0.74,
-  CEIL_BOUNCE: 0.80,
+  FLOOR_BOUNCE: 0.66,     // 細かいバウンドで浮き続ける時間を短縮
+  CEIL_BOUNCE: 0.68,      // 天井反射後の滞空を短縮
   MAX_SPEED: 170,
   // 車衝突時の反発係数 (1.0 以上で「むっちゃ飛ぶ」)
   HIT_RESTITUTION: 1.42,
@@ -17,7 +17,7 @@ const BallPhys = {
   // 最低キック値 (ヒット感確保)
   HIT_MIN_KICK: 16,
   // 衝突時に上方向に必ず加わる量
-  HIT_LIFT: 6.0,
+  HIT_LIFT: 3.8,          // ヒット時の上方向成分を抑制
 };
 
 class Ball {
