@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e88e5" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Gyro Soccer Arena - スマホでロケットリーグ風サッカー</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- ===================== タイトル画面 ===================== -->
+  <div id="screen-title" class="screen active">
+    <div class="title-bg"></div>
+    <div class="title-content">
+      <h1 class="game-title">
+        <span class="title-main">GYRO SOCCER</span>
+        <span class="title-sub">⚽ ロケットリーグ風アリーナサッカー ⚽</span>
+      </h1>
+      <div class="name-input-wrap">
+        <label>プレイヤー名</label>
+        <input type="text" id="player-name" maxlength="10" placeholder="名前を入れてね" value="Player" />
+      </div>
+
+      <div class="car-select">
+        <label>マシンカラー</label>
+        <div class="car-options" id="car-options">
+          <div class="car-option active" data-color="#E53935" style="--c:#E53935"></div>
+          <div class="car-option" data-color="#1E88E5" style="--c:#1E88E5"></div>
+          <div class="car-option" data-color="#FDD835" style="--c:#FDD835"></div>
+          <div class="car-option" data-color="#43A047" style="--c:#43A047"></div>
+          <div class="car-option" data-color="#8E24AA" style="--c:#8E24AA"></div>
+          <div class="car-option" data-color="#FB8C00" style="--c:#FB8C00"></div>
+        </div>
+      </div>
+
+      <div class="team-select">
+        <label>チーム</label>
+        <div class="team-options" id="team-options">
+          <button type="button" class="team-option active" data-team="blue">🔵 BLUE</button>
+          <button type="button" class="team-option" data-team="orange">🟠 ORANGE</button>
+        </div>
+      </div>
+
+      <div class="size-select">
+        <label>マッチサイズ（ソロBot用）</label>
+        <div class="size-options" id="size-options">
+          <button type="button" class="size-option" data-size="1">1v1</button>
+          <button type="button" class="size-option" data-size="2">2v2</button>
+          <button type="button" class="size-option active" data-size="3">3v3</button>
+          <button type="button" class="size-option" data-size="4">4v4</button>
+        </div>
+      </div>
+
+      <div class="title-buttons">
+        <button class="btn btn-primary" id="btn-create-room">🏠 部屋を作る</button>
+        <button class="btn btn-secondary" id="btn-join-room">🔑 部屋に入る</button>
+        <button class="btn btn-ghost" id="btn-solo">🤖 Botと練習</button>
+      </div>
+      <p class="hint">スマホ横向き + ジャイロでハンドル操作！<br>友達と最大4v4でオンライン対戦できるよ。</p>
+    </div>
+  </div>
+
+  <!-- ===================== ルームコード入力 ===================== -->
+  <div id="screen-join" class="screen">
+    <div class="panel">
+      <h2>🔑 部屋コードを入力</h2>
+      <input type="text" id="room-code-input" placeholder="例: ABC123" maxlength="6" />
+      <div class="row">
+        <button class="btn btn-primary" id="btn-do-join">入る</button>
+        <button class="btn btn-ghost" id="btn-join-back">戻る</button>
+      </div>
+      <p id="join-error" class="error-text"></p>
+    </div>
+  </div>
+
+  <!-- ===================== ロビー ===================== -->
+  <div id="screen-lobby" class="screen">
+    <div class="panel lobby-panel">
+      <h2>🏟️ ロビー</h2>
+      <div class="room-code-display">
+        部屋コード: <span id="room-code-show">------</span>
+        <button class="btn-mini" id="btn-copy-code">📋 コピー</button>
+      </div>
+      <div class="lobby-count">参加: <span id="player-count">0 / 8</span></div>
+      <div class="lobby-team-toggle">
+        チーム切替:
+        <button class="team-pill" id="btn-team-blue">🔵 BLUE</button>
+        <button class="team-pill" id="btn-team-orange">🟠 ORANGE</button>
+      </div>
+      <div id="player-list" class="player-list"></div>
+      <div class="lobby-actions">
+        <button class="btn btn-primary" id="btn-start-match">⚽ キックオフ！</button>
+        <button class="btn btn-ghost" id="btn-leave-room">退出</button>
+      </div>
+      <p class="hint">最大8人(4v4)まで。ホストが「キックオフ！」を押すと試合開始。</p>
+    </div>
+  </div>
+
+  <!-- ===================== ゲーム画面 ===================== -->
+  <div id="screen-game" class="screen">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-top">
+        <div class="score-blue">🔵 <span id="hud-score-blue">0</span></div>
+        <div class="hud-time" id="hud-time">05:00</div>
+        <div class="score-orange"><span id="hud-score-orange">0</span> 🟠</div>
+      </div>
+      <div class="hud-speed">
+        <div class="speed-val" id="hud-speed">0</div>
+        <div class="speed-unit">km/h</div>
+      </div>
+      <div class="boost-meter">
+        <div class="boost-label">BOOST <span id="boost-val">0</span>%</div>
+        <div class="boost-bar"><div class="boost-fill" id="boost-fill"></div></div>
+      </div>
+      <div id="goal-banner" class="goal-banner"></div>
+    </div>
+
+    <!-- タッチ操作 -->
+    <div class="touch-controls-left">
+      <button class="ctrl-btn ctrl-brake" id="ctrl-brake">◀ BRAKE</button>
+    </div>
+    <div class="touch-controls-right">
+      <button class="ctrl-btn ctrl-boost" id="ctrl-boost">🔥 BOOST</button>
+      <button class="ctrl-btn ctrl-jump" id="ctrl-jump">⬆ JUMP</button>
+      <button class="ctrl-btn ctrl-accel" id="ctrl-accel">ACCEL ▶</button>
+    </div>
+
+    <!-- 設定ボタン -->
+    <div class="settings-stack">
+      <button class="btn-icon" id="btn-recalibrate" title="ジャイロ再設定">⟲</button>
+      <button class="btn-icon" id="btn-toggle-sens" title="感度">⚙</button>
+    </div>
+    <div class="sensitivity-ctrl" id="sensitivity-ctrl">
+      <label>感度</label>
+      <input type="range" id="sens-slider" min="8" max="35" step="1" value="18" />
+      <span id="sens-val">18°</span>
+      <label class="invert-lbl"><input type="checkbox" id="sens-invert" /> 反転</label>
+    </div>
+
+    <!-- フィニッシュ -->
+    <div id="finish-overlay" class="finish-overlay">
+      <div class="finish-card">
+        <h2 id="finish-title">FULL TIME!</h2>
+        <div id="finish-score" class="finish-score">0 - 0</div>
+        <button class="btn btn-primary" id="btn-back-lobby">🏠 戻る</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <!-- ジャイロ許可ボタン -->
+  <div id="gyro-permission" class="gyro-perm">
+    <div class="panel">
+      <h2>🎮 ジャイロを有効にする</h2>
+      <p>スマホを傾けて操作するため、モーションセンサーへのアクセス許可が必要です。</p>
+      <button class="btn btn-primary" id="btn-enable-gyro">許可する</button>
+      <button class="btn btn-ghost" id="btn-skip-gyro">スキップ（タッチで操作）</button>
+    </div>
+  </div>
+
+  <!-- ライブラリ -->
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/peerjs.min.js"></script>
+
+  <!-- ゲームスクリプト -->
+  <script src="js/utils.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/arena.js"></script>
+  <script src="js/car.js"></script>
+  <script src="js/ball.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
